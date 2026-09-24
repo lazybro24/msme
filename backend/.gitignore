@@ -1,0 +1,19 @@
+# Environment
+.env
+.env*.local
+
+# Dependencies
+node_modules/
+
+# Build
+dist/
+
+# Prisma
+prisma/*.db
+prisma/*.db-journal
+
+# Logs
+*.log
+
+# Local/confidential uploads (serve only via /api/files)
+uploads/

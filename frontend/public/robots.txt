@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+
+Disallow: /secretariat
+Disallow: /secretariat/
+Disallow: /jury-portal
+Disallow: /jury-portal/
+Disallow: /observer
+Disallow: /observer/

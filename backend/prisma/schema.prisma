@@ -1,0 +1,349 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  APPLICANT
+  VERIFICATION
+  ADMINISTRATOR
+  JURY
+  JURY_CHAIR
+  OBSERVER
+}
+
+enum ApplicationStatus {
+  DRAFT
+  SUBMITTED
+  ELIGIBILITY_REVIEW
+  CLARIFICATION_REQUIRED
+  VERIFICATION
+  QUALIFIED
+  READY_FOR_JURY
+  NOT_QUALIFIED
+  DISQUALIFIED
+  JURY_EVALUATION
+  MODERATION_REQUIRED
+  FINALIST
+  FINAL_ASSESSMENT
+  RANKING_READY
+  RESULT_LOCKED
+}
+
+enum EnquiryNature {
+  NOMINATION_SUPPORT
+  ELIGIBILITY_QUESTION
+  PARTNERSHIP
+  EVENT_PARTICIPATION
+  MEDIA_PR
+  JURY_INSTITUTIONAL
+  OTHER
+}
+
+model User {
+  id               String   @id @default(cuid())
+  email            String   @unique
+  mobile           String?
+  fullName         String
+  designation      String?
+  passwordHash     String?
+  orgName          String?
+  roles            Role[]
+  mfaEnabled       Boolean  @default(false)
+  mfaSecret        String?
+  recommendedSlugs String[] @default([])
+  categoryCodes    String[] @default([])
+  expertise        String?
+  affiliation      String?
+  bio              String?
+  linkedin         String?
+  website          String?
+  photoUrl         String?
+  conductAcceptedAt DateTime?
+  active           Boolean  @default(true)
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  organisations       Organisation[]
+  applications        Application[]  @relation("ApplicantApplications")
+  sessions            Session[]
+  notifications       Notification[]
+  helpTickets         HelpTicket[]
+  auditEvents         AuditEvent[]
+  passwordResetTokens PasswordResetToken[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  mfaOk     Boolean  @default(true)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Organisation {
+  id                 String    @id @default(cuid())
+  ownerId            String
+  legalName          String
+  brandName          String?
+  constitution       String?
+  established        String?
+  industry           String?
+  activity           String?
+  website            String?
+  linkedin           String?
+  registeredAddress  String?
+  mysuruAddress      String?
+  pinCode            String?
+  udyam              String?
+  udyamDate          String?
+  classification     String?
+  pan                String?
+  gstin              String?
+  cin                String?
+  employees          String?
+  locations          String?
+  repName            String?
+  repDesignation     String?
+  repEmail           String?
+  repMobile          String?
+  completedAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  owner        User          @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  applications Application[]
+
+  @@unique([ownerId])
+}
+
+model Application {
+  id               String            @id @default(cuid())
+  applicationId    String            @unique
+  categoryCode     String
+  categorySlug     String
+  categoryTitle    String
+  status           ApplicationStatus @default(DRAFT)
+  progress         Int               @default(0)
+  draftJson        Json?
+  submittedAt      DateTime?
+  applicantId      String
+  organisationId   String?
+  organisationName String?
+  sector           String?
+  msme             String?
+  assignedJuryIds  String[]          @default([])
+  adminDecision    String            @default("PENDING")
+  rejectionReason  String?
+  verifiedAt       DateTime?
+  verifiedBy       String?
+  evaluationDeadline DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  applicant      User           @relation("ApplicantApplications", fields: [applicantId], references: [id])
+  organisation   Organisation?  @relation(fields: [organisationId], references: [id])
+  clarifications Clarification[]
+  evaluations    Evaluation[]
+}
+
+model Clarification {
+  id               String   @id @default(cuid())
+  applicationId    String
+  applicationRef   String
+  type             String
+  title            String
+  deadline         String?
+  requiredDocument String?
+  status           String   @default("OPEN")
+  thread           Json     @default("[]")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id     String   @id @default(cuid())
+  userId String
+  title  String
+  body   String
+  read   Boolean  @default(false)
+  at     DateTime @default(now())
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model HelpTicket {
+  id            String   @id @default(cuid())
+  userId        String
+  topic         String
+  message       String
+  attachmentUrl String?
+  status        String   @default("OPEN")
+  createdAt     DateTime @default(now())
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Document {
+  id             String   @id @default(cuid())
+  organisationId String?
+  applicationId  String?
+  name           String
+  evidenceType   String
+  period         String?
+  description    String?
+  visibility     String   @default("Confidential")
+  fileUrl        String?
+  fileName       String?
+  createdAt      DateTime @default(now())
+}
+
+model Evaluation {
+  id              String    @id @default(cuid())
+  applicationId   String
+  juryUserId      String
+  juryName        String?
+  totalScore      Int?
+  scoresJson      Json?
+  lockedAt        DateTime?
+  recommendation  String?
+  overall         String?
+  strengths       String?
+  concerns        String?
+  commentsJson    Json?
+  conflictCleared Boolean   @default(false)
+  conflictNote    String?
+  reopenReason    String?
+  reopenAt        DateTime?
+  reopenApproved  Boolean?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, juryUserId])
+}
+
+model Enquiry {
+  id           String        @id @default(cuid())
+  fullName     String
+  organisation String?
+  designation  String?
+  mobile       String
+  email        String
+  nature       EnquiryNature
+  message      String
+  status       String        @default("OPEN")
+  adminNote    String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model PartnershipRequest {
+  id           String   @id @default(cuid())
+  name         String
+  organisation String
+  designation  String?
+  email        String
+  mobile       String
+  industry     String?
+  interest     String
+  message      String
+  status       String   @default("OPEN")
+  adminNote    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model AuditEvent {
+  id            String   @id @default(cuid())
+  actorId       String?
+  role          String?
+  action        String
+  applicationId String?
+  beforeJson    Json?
+  afterJson     Json?
+  reason        String?
+  ip            String?
+  createdAt     DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id])
+}
+
+model SiteSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model EmailOtp {
+  id        String    @id @default(cuid())
+  email     String
+  userId    String?
+  codeHash  String
+  purpose   String
+  challenge String    @unique
+  expiresAt DateTime
+  consumedAt DateTime?
+  attempts  Int       @default(0)
+  createdAt DateTime  @default(now())
+
+  @@index([email, purpose])
+}
+
+model DocumentRequirement {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  evidenceType String   @default("Statutory")
+  mandatory    Boolean  @default(true)
+  sortOrder    Int      @default(0)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model CmsEntry {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  type      String
+  title     String
+  body      String
+  published Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model CategoryConfig {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  code        String
+  number      String?
+  title       String
+  tagline     String?
+  overview    String?
+  eligibility String?
+  criteria    String?
+  evidence    String?
+  directApply Boolean  @default(true)
+  published   Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

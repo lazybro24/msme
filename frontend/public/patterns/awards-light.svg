@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120" fill="none">
+  <!-- Trophy -->
+  <g transform="translate(18 14)" stroke="#C4890C" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 4h12v6c0 4.4-3.1 8-7 9.2C9.1 18 6 14.4 6 10V4h2z"/>
+    <path d="M6 6H3.5C2.1 6 1 7.1 1 8.5S2.1 11 3.5 11H6"/>
+    <path d="M20 6h2.5C23.9 6 25 7.1 25 8.5S23.9 11 22.5 11H20"/>
+    <path d="M10 19.2V22h6v-2.8"/>
+    <path d="M8 22h10v2.5H8z"/>
+  </g>
+
+  <!-- Medal with star -->
+  <g transform="translate(74 18)" stroke="#C4890C" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="11" r="7.5"/>
+    <path d="M12 6.8l1.25 2.55 2.8.4-2 1.95.5 2.8L12 13.1l-2.55 1.4.5-2.8-2-1.95 2.8-.4L12 6.8z"/>
+    <path d="M8.2 17.8 6.5 26l5.5-2.6L17.5 26l-1.7-8.2"/>
+  </g>
+
+  <!-- Shield award -->
+  <g transform="translate(16 68)" stroke="#C4890C" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 2 24 6v8.5c0 6.2-4.2 11.4-10 13.2C8.2 25.9 4 20.7 4 14.5V6L14 2z"/>
+    <path d="M7.5 13h13"/>
+    <path d="M14 8.5v12"/>
+  </g>
+
+  <!-- Laurel medal -->
+  <g transform="translate(72 70)" stroke="#C4890C" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="5.5"/>
+    <path d="M12 9.2l.85 1.7 1.9.28-1.35 1.32.32 1.88L12 13.2l-1.72.98.32-1.88-1.35-1.32 1.9-.28L12 9.2z"/>
+    <path d="M5 8c-2.2 2.2-3.2 5.2-2.6 8 .5 2.4 2.2 4.4 4.4 5.4"/>
+    <path d="M19 8c2.2 2.2 3.2 5.2 2.6 8-.5 2.4-2.2 4.4-4.4 5.4"/>
+    <path d="M4.2 11.5c1.2-.4 2.2.1 2.8 1M3.8 14.5c1.2-.4 2.2.1 2.8 1M19.8 11.5c-1.2-.4-2.2.1-2.8 1M20.2 14.5c-1.2-.4-2.2.1-2.8 1"/>
+  </g>
+</svg>
