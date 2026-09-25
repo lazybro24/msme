@@ -1,7 +1,8 @@
 [build]
 builder = "NIXPACKS"
-# generate does not need a live DB — only a placeholder URL if Railway omits vars at build
-buildCommand = "sh -c 'export DATABASE_URL=\"${DATABASE_URL:-postgresql://build:build@127.0.0.1:5432/build}\" && npx prisma generate && npm run build'"
+# Install ALL deps (incl. typescript/@types) then generate + compile.
+# Nixpacks production install omits devDependencies — types must live in dependencies.
+buildCommand = "sh -c 'export DATABASE_URL=\"${DATABASE_URL:-postgresql://build:build@127.0.0.1:5432/build}\" && npm install && npx prisma generate && npx tsc'"
 
 [deploy]
 startCommand = "npm start"
