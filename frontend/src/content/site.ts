@@ -1,8 +1,13 @@
 export const site = {
   name: "Mysuru MSME Awards 2026",
   tagline: "Recognizing Excellence. Enabling Growth. Inspiring Tomorrow.",
+  subtitle: "Mysuru's Business Recognition & Growth Platform",
+  description:
+    "Celebrating the enterprises, entrepreneurs and people contributing to Mysuru's economic progress while creating meaningful opportunities for recognition, visibility, connections, knowledge and growth.",
   organizer: "Toya Corporate Consulting Services Pvt. Ltd.",
   year: 2026,
+  /** Production site URL — used for absolute Open Graph / sitemap links */
+  url: process.env.NEXT_PUBLIC_SITE_URL || "https://msme-eta.vercel.app",
 };
 
 /** Public navigation — Eligibility lives under Awards */
