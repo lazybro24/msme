@@ -7,7 +7,7 @@ export const site = {
   organizer: "Toya Corporate Consulting Services Pvt. Ltd.",
   year: 2026,
   /** Production site URL — used for absolute Open Graph / sitemap links */
-  url: process.env.NEXT_PUBLIC_SITE_URL || "https://msme-eta.vercel.app",
+  url: process.env.NEXT_PUBLIC_SITE_URL || "https://msme.vercel.app",
 };
 
 /** Public navigation — Eligibility lives under Awards */
