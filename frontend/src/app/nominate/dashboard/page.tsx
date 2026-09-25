@@ -92,6 +92,7 @@ function DashboardInner() {
   }
 
   useEffect(() => {
+    // Core dashboard data first — show UI without waiting on clarifications badge
     Promise.all([
       loadApps(),
       apiGet<{ notifications: { id: string; title: string; body: string; read: boolean }[] }>(
@@ -111,10 +112,11 @@ function DashboardInner() {
           setDocsComplete(0);
           setDocsTotal(7);
         }),
-      apiGet<{ clarifications: { id: string }[] }>("/api/clarifications")
-        .then((d) => setClarificationCount(d.clarifications.length))
-        .catch(() => setClarificationCount(0)),
     ]).finally(() => setLoading(false));
+
+    apiGet<{ clarifications: { id: string }[] }>("/api/clarifications")
+      .then((d) => setClarificationCount(d.clarifications.length))
+      .catch(() => setClarificationCount(0));
   }, []);
 
   function canDeleteApp(app: App) {

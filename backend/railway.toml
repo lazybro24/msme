@@ -1,9 +1,10 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "npm install && npx prisma generate && npm run build"
+# generate does not need a live DB — only a placeholder URL if Railway omits vars at build
+buildCommand = "sh -c 'export DATABASE_URL=\"${DATABASE_URL:-postgresql://build:build@127.0.0.1:5432/build}\" && npx prisma generate && npm run build'"
 
 [deploy]
-# migrate deploy applies prisma/migrations; then start API
 startCommand = "npm start"
 healthcheckPath = "/api/health"
+healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"

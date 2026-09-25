@@ -184,19 +184,19 @@ authRouter.post("/verify-otp", async (req, res) => {
   const authUser = toAuthUser(user);
 
   if (parsed.data.purpose === "REGISTER") {
-    await notify(user.id, "Welcome", "Your applicant account is ready.");
-    await audit({
+    void notify(user.id, "Welcome", "Your applicant account is ready.").catch(() => undefined);
+    void audit({
       actorId: user.id,
       role: user.roles[0],
       action: "REGISTER_OTP_VERIFIED",
-    });
+    }).catch(() => undefined);
     void sendWelcomeMail(user.email, user.fullName, user.orgName);
   } else {
-    await audit({
+    void audit({
       actorId: user.id,
       role: user.roles[0],
       action: "LOGIN_OTP_VERIFIED",
-    });
+    }).catch(() => undefined);
   }
 
   res.json({

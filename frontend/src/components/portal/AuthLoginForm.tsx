@@ -1,7 +1,6 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiPost, setSession, clearSession, type AuthUser } from "@/lib/api";
 import { useToast } from "@/components/ui/Toast";
@@ -40,7 +39,6 @@ export function AuthLoginForm({
   /** If set, login succeeds only when the user has one of these roles. */
   requiredRoles?: string[];
 }) {
-  const router = useRouter();
   const toast = useToast();
   const [email, setEmail] = useState(defaultEmail);
   const [password, setPassword] = useState("");
@@ -69,7 +67,9 @@ export function AuthLoginForm({
       description: `Welcome, ${user.fullName}`,
       tone: "success",
     });
-    router.push(redirectTo);
+    // Hard navigate so the login screen unloads immediately (soft router.push feels stuck
+    // while the dashboard waits on Neon / multiple API calls).
+    window.location.assign(redirectTo);
   }
 
   async function onSubmit(e: FormEvent) {
