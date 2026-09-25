@@ -21,9 +21,9 @@ async function main() {
   }
 
   const app = createApp();
-  app.listen(port, () => {
-    console.log(`Mysuru MSME Awards API listening on http://localhost:${port}`);
-    console.log(`Health: http://localhost:${port}/api/health`);
+  app.listen(port, "0.0.0.0", () => {
+    console.log(`Mysuru MSME Awards API listening on 0.0.0.0:${port}`);
+    console.log(`Health: http://0.0.0.0:${port}/api/health`);
   });
 }
 

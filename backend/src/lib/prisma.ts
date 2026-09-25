@@ -17,9 +17,10 @@ function createPool() {
   return new Pool({
     connectionString: dbUrl(),
     max: 5,
-    idleTimeoutMillis: 10_000,
+    idleTimeoutMillis: 20_000,
     connectionTimeoutMillis: 20_000,
-    allowExitOnIdle: true,
+    // false = keep the Express process alive on Railway (true exits when pool is idle)
+    allowExitOnIdle: false,
     ssl: { rejectUnauthorized: false },
   });
 }
