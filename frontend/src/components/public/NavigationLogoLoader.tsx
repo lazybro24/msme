@@ -9,7 +9,7 @@ import { LOGO_SRC } from "@/lib/logo";
 const MIN_VISIBLE_MS = 1400;
 
 /** Only the primary public header links (Home → Contact). */
-const MAIN_NAV_PATHS = new Set(mainNav.map((item) => item.href));
+const MAIN_NAV_PATHS = new Set<string>(mainNav.map((item) => item.href));
 
 function isMainNavPath(pathname: string) {
   if (MAIN_NAV_PATHS.has(pathname)) return true;
