@@ -13,8 +13,6 @@ type SendMailInput = {
 };
 
 const RESEND_TIMEOUT_MS = Number(process.env.RESEND_TIMEOUT_MS || 12000);
-
-/** Default Resend test sender — gmail.com cannot be used as FROM without domain verify. */
 const DEFAULT_RESEND_FROM = "Mysuru MSME Awards <onboarding@resend.dev>";
 
 export function resendConfigured() {
@@ -25,11 +23,6 @@ export function mailConfigured() {
   return resendConfigured();
 }
 
-/** @deprecated SMTP removed — use Resend only */
-export function smtpConfigured() {
-  return false;
-}
-
 export function allowDevMailCodes() {
   if (process.env.NODE_ENV === "production" && process.env.OTP_DEV_EXPOSE !== "true") {
     return false;
@@ -38,8 +31,7 @@ export function allowDevMailCodes() {
 }
 
 function resendFromAddress() {
-  const raw = (process.env.RESEND_FROM || process.env.SMTP_FROM || "").trim();
-  // Never send From *@gmail.com via Resend — domain not verifiable → 403
+  const raw = (process.env.RESEND_FROM || "").trim();
   if (!raw || /@gmail\.com>/i.test(raw) || /@gmail\.com$/i.test(raw)) {
     return DEFAULT_RESEND_FROM;
   }

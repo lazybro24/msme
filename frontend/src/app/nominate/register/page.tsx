@@ -72,7 +72,8 @@ export default function NominateRegisterPage() {
         });
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Registration failed");
+      const message = err instanceof Error ? err.message : "Registration failed";
+      setError(message);
     } finally {
       setBusy(false);
     }
@@ -150,7 +151,19 @@ export default function NominateRegisterPage() {
               <p className="mt-2 text-xs text-[#888]">{otp.hint}</p>
             </div>
           )}
-          {error && <p className="text-sm text-red-700">{error}</p>}
+          {error && (
+            <p className="text-sm text-red-700">
+              {error}
+              {/already exists/i.test(error) ? (
+                <>
+                  {" "}
+                  <Link href="/nominate/login" className="font-semibold underline">
+                    Go to login
+                  </Link>
+                </>
+              ) : null}
+            </p>
+          )}
           <button type="submit" className="btn-primary w-full" disabled={busy}>
             {busy ? "Please wait…" : otp ? "Verify & continue" : "Create Account"}
           </button>

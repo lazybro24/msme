@@ -58,7 +58,12 @@ authRouter.post("/register", async (req, res) => {
 
   const email = parsed.data.email.toLowerCase();
   const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) return res.status(409).json({ error: "Email already registered" });
+  if (existing) {
+    return res.status(409).json({
+      error: "An account with this email already exists. Please log in.",
+      accountExists: true,
+    });
+  }
 
   const passwordHash = await hashPassword(parsed.data.password);
   const user = await prisma.user.create({
@@ -132,7 +137,7 @@ authRouter.post("/login", async (req, res) => {
     otpRequired: true,
     purpose: "LOGIN",
     challengeId: otp.challengeId,
-    message: otp.message,
+    message: "Account found. Enter the verification code we sent to your email.",
     demoOtp: otp.demoOtp,
     email: user.email,
   });

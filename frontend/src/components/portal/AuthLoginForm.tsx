@@ -123,7 +123,7 @@ export function AuthLoginForm({
           purpose: data.purpose || "LOGIN",
         });
         toast.push({
-          title: "Check your email",
+          title: "Account found",
           description: data.demoOtp
             ? `Local demo code: ${data.demoOtp}`
             : "Enter the verification code we emailed you",

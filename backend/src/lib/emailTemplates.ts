@@ -1,6 +1,5 @@
 /**
- * Branded HTML email templates for Mysuru MSME Awards
- * (used by Resend / SMTP — no Resend dashboard template ID needed).
+ * Branded HTML email templates for Mysuru MSME Awards (Resend).
  */
 
 const GOLD = "#e8a914";

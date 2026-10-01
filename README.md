@@ -17,7 +17,7 @@ msme/
 | Area | Packages |
 | --- | --- |
 | Frontend | Next.js, React, Tailwind, Framer Motion |
-| Backend | Express, Zod, Prisma, **nodemailer** (SMTP), **bcryptjs**, **multer** (uploads) |
+| Backend | Express, Zod, Prisma, **Resend** (email OTP), **bcryptjs**, **multer** (uploads) |
 
 Run once per machine:
 
@@ -36,26 +36,23 @@ npx prisma generate
 | --- | --- | --- |
 | **Node.js 18+** | Yes | Run frontend + backend |
 | **PostgreSQL 14+** | Yes for Phase 2/3 persistence | Real applications, evidence, jury scores |
-| **SMTP account** | For real email | Welcome / status mail (Gmail App Password, Mailtrap, SES, etc.) |
+| **Resend API key** | For real email OTP | Register / login verification codes |
 | Docker Desktop | Optional | Easiest way to run Postgres locally |
 
-**Auth:** Email + password, then **email OTP** on every register/login. Set `SMTP_*` for real mail.
+**Auth:** Email + password, then **email OTP** on every register/login. Set `RESEND_API_KEY` for real mail.
 
-### SMTP (required for real OTP / welcome / reset mail)
+### Email (Resend — required for real OTP)
 
 Edit `backend/.env`:
 
 ```
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your@gmail.com
-SMTP_PASS=your-app-password
-SMTP_FROM=Mysuru MSME Awards <noreply@yourdomain.com>
+RESEND_API_KEY=re_xxxxxxxx
+RESEND_FROM=Mysuru MSME Awards <onboarding@resend.dev>
 OTP_DEV_EXPOSE=true
 ```
 
-With SMTP filled, codes go to inbox (no demo tokens).  
-Without SMTP, local/dev can still show OTP/reset codes in the API when `OTP_DEV_EXPOSE=true`.
+Verify your domain at resend.com/domains to email any applicant (not only your Resend account email).  
+Without Resend, local/dev can show demo OTP when `OTP_DEV_EXPOSE=true`.
 
 ### PostgreSQL (Neon)
 

@@ -60,7 +60,7 @@ export async function issueEmailOtp(input: {
       ? "Enter the verification code sent to your email."
       : mail.error
         ? `Email send failed (${mail.error}). Use the demo code shown for local testing.`
-        : "SMTP not configured — use the demo code shown (local only).",
+        : "Email not configured — use the demo code shown (local only).",
     demoOtp: expose ? code : undefined,
     emailSent: mail.sent,
   };
