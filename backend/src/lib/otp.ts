@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { prisma } from "./prisma";
-import { allowDevMailCodes, generateOtpCode, hashOtp, sendOtpMail, smtpConfigured } from "./mail";
+import { allowDevMailCodes, generateOtpCode, hashOtp, mailConfigured, sendOtpMail } from "./mail";
 
 export type OtpPurpose = "REGISTER" | "LOGIN" | "RESET";
 
@@ -36,9 +36,9 @@ export async function issueEmailOtp(input: {
   const mail = await sendOtpMail(email, code, input.purpose);
   const expose = !mail.sent && allowDevMailCodes();
 
-  if (!mail.sent && smtpConfigured() && !expose) {
-    const hint = /ENETUNREACH|ETIMEDOUT|timed out|ECONNREFUSED/i.test(mail.error || "")
-      ? " Email server unreachable from hosting (check SMTP / IPv4). Try again shortly."
+  if (!mail.sent && mailConfigured() && !expose) {
+    const hint = /ENETUNREACH|ETIMEDOUT|timed out|ECONNREFUSED|timeout/i.test(mail.error || "")
+      ? " Email server unreachable from hosting. Set RESEND_API_KEY or SMTP_PORT=465 on Railway."
       : "";
     return {
       ok: false as const,
@@ -49,7 +49,7 @@ export async function issueEmailOtp(input: {
   if (!mail.sent && !expose) {
     return {
       ok: false as const,
-      error: "Email delivery is not configured. Set SMTP_* in backend/.env",
+      error: "Email delivery is not configured. Set RESEND_API_KEY or SMTP_* on Railway.",
     };
   }
 

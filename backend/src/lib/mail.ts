@@ -13,7 +13,7 @@ type SendMailInput = {
   html?: string;
 };
 
-const SMTP_TIMEOUT_MS = Number(process.env.SMTP_TIMEOUT_MS || 10000);
+const SMTP_TIMEOUT_MS = Number(process.env.SMTP_TIMEOUT_MS || 8000);
 
 export function smtpConfigured() {
   const host = process.env.SMTP_HOST?.trim() || "";
@@ -28,6 +28,15 @@ export function smtpConfigured() {
   return true;
 }
 
+export function resendConfigured() {
+  return Boolean(process.env.RESEND_API_KEY?.trim());
+}
+
+/** True if any email provider is ready (Resend HTTP or Gmail SMTP). */
+export function mailConfigured() {
+  return resendConfigured() || smtpConfigured();
+}
+
 /** When SMTP is missing or broken in non-production, allow returning OTP/reset codes in API. */
 export function allowDevMailCodes() {
   if (process.env.NODE_ENV === "production" && process.env.OTP_DEV_EXPOSE !== "true") {
@@ -36,45 +45,13 @@ export function allowDevMailCodes() {
   return process.env.OTP_DEV_EXPOSE !== "false";
 }
 
-/** Resolve host to IPv4 only — Railway often cannot reach Gmail via IPv6 (ENETUNREACH). */
-async function createIpv4Transporter() {
-  const hostname = (process.env.SMTP_HOST || "smtp.gmail.com").trim();
-  const port = Number(process.env.SMTP_PORT || 587);
-  const { address } = await lookup4(hostname, { family: 4 });
-
-  const options: SMTPTransport.Options = {
-    host: address, // connect to IPv4 literal
-    port,
-    secure: port === 465,
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    },
-    connectionTimeout: SMTP_TIMEOUT_MS,
-    greetingTimeout: SMTP_TIMEOUT_MS,
-    socketTimeout: SMTP_TIMEOUT_MS,
-    tls: {
-      // SNI / cert must match the real hostname, not the IP
-      servername: hostname,
-      rejectUnauthorized: true,
-    },
-    name: hostname,
-  };
-
-  console.info(`[mail] SMTP connecting via IPv4 ${address}:${port} (${hostname})`);
-  return nodemailer.createTransport(options);
-}
-
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       promise,
       new Promise<T>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error(`${label} timed out after ${ms}ms`)),
-          ms,
-        );
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
       }),
     ]);
   } finally {
@@ -82,35 +59,140 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
   }
 }
 
-export async function sendMail(
-  input: SendMailInput,
-): Promise<{ sent: boolean; skipped?: string; error?: string }> {
-  if (!smtpConfigured()) {
-    console.info("[mail] SMTP not configured — skipped:", input.subject, "→", input.to);
-    return { sent: false, skipped: "SMTP not configured" };
-  }
+/** Resend HTTP API — works on Railway when outbound SMTP ports are blocked. */
+async function sendViaResend(input: SendMailInput): Promise<void> {
+  const key = process.env.RESEND_API_KEY!.trim();
+  const from = process.env.SMTP_FROM?.trim() || process.env.RESEND_FROM?.trim();
+  if (!from) throw new Error("SMTP_FROM (or RESEND_FROM) required for Resend");
 
-  try {
-    const tx = await createIpv4Transporter();
-    await withTimeout(
-      tx.sendMail({
-        from: process.env.SMTP_FROM,
-        to: input.to,
+  const res = await withTimeout(
+    fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from,
+        to: [input.to],
         subject: input.subject,
         text: input.text,
         html:
           input.html ??
           `<p style="font-family:Arial,sans-serif;line-height:1.5">${input.text.replace(/\n/g, "<br/>")}</p>`,
       }),
-      SMTP_TIMEOUT_MS + 3000,
-      "SMTP send",
-    );
-    return { sent: true };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "SMTP send failed";
-    console.error("[mail] send failed:", message);
-    return { sent: false, error: message };
+    }),
+    SMTP_TIMEOUT_MS,
+    "Resend API",
+  );
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Resend ${res.status}: ${body.slice(0, 200)}`);
   }
+  console.info("[mail] sent via Resend →", input.to);
+}
+
+async function createIpv4Transporter(port: number) {
+  const hostname = (process.env.SMTP_HOST || "smtp.gmail.com").trim();
+  const { address } = await lookup4(hostname, { family: 4 });
+
+  const options: SMTPTransport.Options = {
+    host: address,
+    port,
+    secure: port === 465,
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+    requireTLS: port === 587,
+    connectionTimeout: SMTP_TIMEOUT_MS,
+    greetingTimeout: SMTP_TIMEOUT_MS,
+    socketTimeout: SMTP_TIMEOUT_MS,
+    tls: {
+      servername: hostname,
+      rejectUnauthorized: true,
+    },
+    name: hostname,
+  };
+
+  console.info(`[mail] SMTP trying IPv4 ${address}:${port} (${hostname})`);
+  return nodemailer.createTransport(options);
+}
+
+async function sendViaSmtp(input: SendMailInput): Promise<void> {
+  const preferred = Number(process.env.SMTP_PORT || 587);
+  // Try preferred port, then the other common Gmail port (Railway often blocks 587).
+  const ports = [...new Set([preferred, preferred === 465 ? 587 : 465])];
+  let lastErr: unknown;
+
+  for (const port of ports) {
+    try {
+      const tx = await createIpv4Transporter(port);
+      await withTimeout(
+        tx.sendMail({
+          from: process.env.SMTP_FROM,
+          to: input.to,
+          subject: input.subject,
+          text: input.text,
+          html:
+            input.html ??
+            `<p style="font-family:Arial,sans-serif;line-height:1.5">${input.text.replace(/\n/g, "<br/>")}</p>`,
+        }),
+        SMTP_TIMEOUT_MS + 2000,
+        `SMTP :${port}`,
+      );
+      console.info(`[mail] sent via SMTP :${port} →`, input.to);
+      return;
+    } catch (err) {
+      lastErr = err;
+      console.warn(
+        `[mail] SMTP :${port} failed:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
+  throw lastErr instanceof Error ? lastErr : new Error("SMTP send failed");
+}
+
+export async function sendMail(
+  input: SendMailInput,
+): Promise<{ sent: boolean; skipped?: string; error?: string }> {
+  if (!mailConfigured()) {
+    console.info("[mail] no provider configured — skipped:", input.subject, "→", input.to);
+    return { sent: false, skipped: "Email not configured" };
+  }
+
+  const errors: string[] = [];
+
+  // Prefer Resend on Railway (HTTPS) — avoids blocked SMTP ports.
+  if (resendConfigured()) {
+    try {
+      await sendViaResend(input);
+      return { sent: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Resend failed";
+      console.error("[mail] Resend failed:", message);
+      errors.push(message);
+    }
+  }
+
+  if (smtpConfigured()) {
+    try {
+      await sendViaSmtp(input);
+      return { sent: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "SMTP send failed";
+      console.error("[mail] SMTP failed:", message);
+      errors.push(message);
+    }
+  }
+
+  return {
+    sent: false,
+    error: errors.join(" | ") || "Email send failed",
+  };
 }
 
 export function brandMailHtml(title: string, bodyHtml: string) {
