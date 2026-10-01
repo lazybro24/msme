@@ -1,10 +1,10 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useMemo, useState, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Suspense } from "react";
 import { apiPost } from "@/lib/api";
+import { PasswordField } from "@/components/ui/PasswordField";
 
 function ResetInner() {
   const search = useSearchParams();
@@ -35,8 +35,11 @@ function ResetInner() {
 
   return (
     <div className="page-awards-bg page-awards-bg--cream flex min-h-screen items-center justify-center px-4 py-12">
-      <div className="w-full max-w-md border border-black/10 bg-white p-6 sm:p-8">
-        <Link href="/nominate/login" className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--brand-gold-dark)] hover:underline">
+      <div className="auth-form-card w-full max-w-md border border-black/10 p-6 sm:p-8">
+        <Link
+          href="/nominate/login"
+          className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--brand-gold-dark)] hover:underline"
+        >
           ← Login
         </Link>
         <h1 className="mt-3 font-display text-3xl font-black italic uppercase">Reset password</h1>
@@ -44,17 +47,14 @@ function ResetInner() {
           <p className="mt-4 text-sm text-red-700">Missing reset token. Use the link from your email.</p>
         ) : (
           <form className="mt-6 space-y-4" onSubmit={onSubmit}>
-            <div>
-              <label className="label">New password</label>
-              <input
-                className="input"
-                type="password"
-                required
-                minLength={8}
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-              />
-            </div>
+            <PasswordField
+              label="New password"
+              required
+              minLength={8}
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              autoComplete="new-password"
+            />
             <button type="submit" className="btn-primary w-full" disabled={busy}>
               {busy ? "Saving…" : "Set new password"}
             </button>

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiPost, setSession, type AuthUser } from "@/lib/api";
+import { PasswordField } from "@/components/ui/PasswordField";
 
 type RegisterStart = {
   otpRequired: true;
@@ -79,7 +80,7 @@ export default function NominateRegisterPage() {
 
   return (
     <div className="page-awards-bg page-awards-bg--cream flex min-h-screen items-center justify-center px-4 py-12">
-      <div className="w-full max-w-md border border-black/10 bg-white p-6 sm:p-8">
+      <div className="auth-form-card w-full max-w-md border border-black/10 p-6 sm:p-8">
         <Link
           href="/nominate"
           className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--brand-gold-dark)] hover:underline"
@@ -114,14 +115,22 @@ export default function NominateRegisterPage() {
                   />
                 </div>
               ))}
-              <div>
-                <label className="label">Password</label>
-                <input className="input" name="password" type="password" required minLength={8} />
-              </div>
-              <div>
-                <label className="label">Confirm Password</label>
-                <input className="input" name="confirm" type="password" required minLength={8} />
-              </div>
+              <PasswordField
+                label="Password"
+                name="password"
+                required
+                minLength={8}
+                autoComplete="new-password"
+                error={Boolean(error)}
+              />
+              <PasswordField
+                label="Confirm Password"
+                name="confirm"
+                required
+                minLength={8}
+                autoComplete="new-password"
+                error={Boolean(error)}
+              />
               <label className="flex items-start gap-2 text-sm">
                 <input type="checkbox" required className="mt-1" />
                 I agree to the Privacy Policy and Terms of Use.
