@@ -9,7 +9,6 @@ export default function ObserverLoginPage() {
       subtitle="Read-only process assurance"
       defaultEmail=""
       redirectTo="/observer"
-      forgotHref="/nominate/forgot-password"
     />
   );
 }

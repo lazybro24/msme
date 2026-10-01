@@ -95,8 +95,6 @@ export async function mountApiRoutes(app: Express): Promise<void> {
   app.use("/api/auth/register", authLimiter);
   app.use("/api/auth/verify-otp", authLimiter);
   app.use("/api/auth/resend-otp", authLimiter);
-  app.use("/api/auth/forgot-password", authLimiter);
-  app.use("/api/auth/reset-password", authLimiter);
   app.use("/api/enquiries", publicFormLimiter);
   app.use("/api/partnerships", publicFormLimiter);
 

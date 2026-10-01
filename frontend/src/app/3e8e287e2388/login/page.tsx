@@ -9,7 +9,6 @@ export default function AdminLoginPage() {
       subtitle="Authorised awards team only."
       defaultEmail=""
       redirectTo="/3e8e287e2388"
-      forgotHref="/nominate/forgot-password"
       requiredRoles={["ADMINISTRATOR", "VERIFICATION", "JURY_CHAIR", "OBSERVER"]}
     />
   );

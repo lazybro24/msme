@@ -9,7 +9,6 @@ export default function NominateLoginPage() {
       subtitle="Sign in to continue your nomination."
       defaultEmail=""
       redirectTo="/nominate/dashboard"
-      forgotHref="/nominate/forgot-password"
     />
   );
 }

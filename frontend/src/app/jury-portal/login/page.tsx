@@ -9,7 +9,6 @@ export default function JuryLoginPage() {
       subtitle="Jury Portal · Independent evaluation"
       defaultEmail=""
       redirectTo="/jury-portal"
-      forgotHref="/nominate/forgot-password"
     />
   );
 }

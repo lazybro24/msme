@@ -86,26 +86,6 @@ export function welcomeEmailTemplate(fullName: string, orgName: string | null | 
   return { subject: title, text, html };
 }
 
-export function passwordResetEmailTemplate(fullName: string, link: string) {
-  const title = "Reset your password";
-  const text = `Hi ${fullName},\n\nReset your password (valid 1 hour):\n${link}\n\nIf you did not request this, ignore this email.`;
-  const html = brandShell(
-    title,
-    `<p style="margin:0 0 12px">Hi <strong>${escapeHtml(fullName)}</strong>,</p>
-     <p style="margin:0 0 16px">We received a request to reset your Mysuru MSME Awards account password. This link is valid for <strong>1 hour</strong>.</p>
-     <p style="margin:0 0 20px">
-       <a href="${escapeHtml(link)}" style="display:inline-block;background:${GOLD};color:${INK};text-decoration:none;padding:12px 18px;font-weight:700;font-size:13px;letter-spacing:.04em;text-transform:uppercase">Reset password</a>
-     </p>
-     <p style="margin:0;font-size:12px;color:${MUTED};word-break:break-all">${escapeHtml(link)}</p>
-     <p style="margin:16px 0 0;font-size:13px;color:${MUTED}">If you did not request this, ignore this email — your password will stay the same.</p>`,
-  );
-  return {
-    subject: "Reset your Mysuru MSME Awards password",
-    text,
-    html,
-  };
-}
-
 function escapeHtml(value: string) {
   return value
     .replace(/&/g, "&amp;")

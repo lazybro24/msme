@@ -15,9 +15,8 @@ import { hashPassword, verifyPassword } from "../lib/password";
 import { MIN_PASSWORD_LENGTH } from "../lib/passwordPolicy";
 import {
   allowDevMailCodes,
-  sendPasswordResetMail,
+  mailConfigured,
   sendWelcomeMail,
-  smtpConfigured,
 } from "../lib/mail";
 import { issueEmailOtp, verifyEmailOtp } from "../lib/otp";
 import { audit, notify, toAuthUser } from "../lib/users";
@@ -537,87 +536,9 @@ authRouter.post("/change-password", requireAuth, async (req: AuthRequest, res) =
   res.json({ ok: true, message: "Password updated." });
 });
 
-authRouter.post("/forgot-password", async (req, res) => {
-  const schema = z.object({ email: z.string().email() });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  const user = await prisma.user.findUnique({
-    where: { email: parsed.data.email.toLowerCase() },
-  });
-
-  const generic = { ok: true, message: "If that account exists, a reset link was sent." };
-  if (!user || user.active === false) return res.json(generic);
-
-  const token = crypto.randomBytes(32).toString("hex");
-  const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
-  await prisma.passwordResetToken.create({
-    data: { userId: user.id, token, expiresAt },
-  });
-  const origin = process.env.CORS_ORIGIN || "http://localhost:3000";
-  const link = `${origin}/nominate/reset-password?token=${token}`;
-  const mail = await sendPasswordResetMail(user.email, user.fullName, link);
-
-  await audit({
-    actorId: user.id,
-    role: user.roles[0],
-    action: "PASSWORD_RESET_REQUESTED",
-  });
-
-  if (mail.sent) return res.json(generic);
-
-  if (smtpConfigured()) {
-    return res.status(503).json({
-      error: mail.error || "Could not send reset email. Check SMTP configuration.",
-    });
-  }
-
-  if (!allowDevMailCodes()) {
-    return res.status(503).json({
-      error: "SMTP is not configured. Set SMTP_* in backend/.env to send reset emails.",
-    });
-  }
-
-  res.json({
-    ...generic,
-    message: "SMTP not configured — use the demo reset link (local only).",
-    demoResetToken: token,
-    demoResetLink: link,
-  });
-});
-
-authRouter.post("/reset-password", async (req, res) => {
-  const schema = z.object({
-    token: z.string().min(10),
-    newPassword: z.string().min(MIN_PASSWORD_LENGTH),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  const row = await prisma.passwordResetToken.findUnique({
-    where: { token: parsed.data.token },
-  });
-  if (!row || row.usedAt || row.expiresAt.getTime() < Date.now()) {
-    return res.status(400).json({ error: "Invalid or expired reset token" });
-  }
-  const passwordHash = await hashPassword(parsed.data.newPassword);
-  await prisma.user.update({
-    where: { id: row.userId },
-    data: { passwordHash },
-  });
-  await prisma.passwordResetToken.update({
-    where: { id: row.id },
-    data: { usedAt: new Date() },
-  });
-  await prisma.session.deleteMany({ where: { userId: row.userId } });
-  await audit({
-    actorId: row.userId,
-    action: "PASSWORD_RESET_COMPLETED",
-  });
-  res.json({ ok: true, message: "Password reset. You can sign in now." });
-});
-
 authRouter.get("/mail-status", (_req, res) => {
   res.json({
-    smtpConfigured: smtpConfigured(),
+    resendConfigured: mailConfigured(),
     otpDevExpose: allowDevMailCodes(),
   });
 });

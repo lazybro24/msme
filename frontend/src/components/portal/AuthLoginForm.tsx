@@ -28,7 +28,6 @@ export function AuthLoginForm({
   defaultEmail,
   redirectTo,
   homeHref = "/",
-  forgotHref = "/nominate/forgot-password",
   requiredRoles,
 }: {
   title: string;
@@ -36,7 +35,6 @@ export function AuthLoginForm({
   defaultEmail: string;
   redirectTo: string;
   homeHref?: string;
-  forgotHref?: string;
   /** If set, login succeeds only when the user has one of these roles. */
   requiredRoles?: string[];
 }) {
@@ -267,16 +265,6 @@ export function AuthLoginForm({
             {busy ? "Please wait…" : stepLabel}
           </button>
         </form>
-        {!otp && !authenticator && (
-          <p className="mt-3 text-center text-sm">
-            <Link
-              href={forgotHref}
-              className="text-[var(--brand-gold-dark)] underline-offset-2 hover:underline"
-            >
-              Forgot password?
-            </Link>
-          </p>
-        )}
         <p className="mt-4 text-center text-xs text-[#888]">
           Password + email OTP required. If MFA is enabled, Google Authenticator is required too.
         </p>

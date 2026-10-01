@@ -37,8 +37,8 @@ export async function issueEmailOtp(input: {
   const expose = !mail.sent && allowDevMailCodes();
 
   if (!mail.sent && mailConfigured() && !expose) {
-    const hint = /ENETUNREACH|ETIMEDOUT|timed out|ECONNREFUSED|timeout/i.test(mail.error || "")
-      ? " Email server unreachable from hosting. Set RESEND_API_KEY or SMTP_PORT=465 on Railway."
+    const hint = /domain is not verified|403/i.test(mail.error || "")
+      ? " Verify your domain at resend.com/domains (or keep From as onboarding@resend.dev)."
       : "";
     return {
       ok: false as const,
@@ -49,7 +49,7 @@ export async function issueEmailOtp(input: {
   if (!mail.sent && !expose) {
     return {
       ok: false as const,
-      error: "Email delivery is not configured. Set RESEND_API_KEY or SMTP_* on Railway.",
+      error: "Email delivery is not configured. Set RESEND_API_KEY on Railway.",
     };
   }
 
