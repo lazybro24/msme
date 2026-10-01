@@ -1,7 +1,7 @@
 [build]
 builder = "NIXPACKS"
-# Install ALL deps (incl. typescript/@types) then generate + compile.
-buildCommand = "sh -c 'export DATABASE_URL=\"${DATABASE_URL:-postgresql://build:build@127.0.0.1:5432/build}\" && npm ci && npx prisma generate && npx tsc'"
+# Nixpacks already runs `npm ci` in install — do NOT run it again (EBUSY on node_modules).
+buildCommand = "sh -c 'export DATABASE_URL=\"${DATABASE_URL:-postgresql://build:build@127.0.0.1:5432/build}\" && npx prisma generate && npx tsc'"
 
 [deploy]
 startCommand = "node scripts/start-prod.js"
