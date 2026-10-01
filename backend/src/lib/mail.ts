@@ -41,6 +41,7 @@ export function allowDevMailCodes() {
 
 function transporter() {
   const port = Number(process.env.SMTP_PORT || 587);
+  // `family: 4` forces IPv4 (avoids Gmail ENETUNREACH on Railway IPv6).
   return nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port,
@@ -49,13 +50,11 @@ function transporter() {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
     },
-    // Fail fast — do not hang register/login for minutes on bad network
     connectionTimeout: SMTP_TIMEOUT_MS,
     greetingTimeout: SMTP_TIMEOUT_MS,
     socketTimeout: SMTP_TIMEOUT_MS,
-    // Force IPv4 where supported by the underlying socket
     family: 4,
-  } as nodemailer.TransportOptions);
+  } as Parameters<typeof nodemailer.createTransport>[0]);
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
