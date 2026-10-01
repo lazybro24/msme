@@ -58,7 +58,14 @@ export async function persistUploadedFile(opts: {
   absolutePath: string;
   contentType?: string;
 }) {
-  if (!s3Enabled()) return;
+  if (!s3Enabled()) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "Object storage is not configured. Set S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY (and S3_ENDPOINT for Cloudflare R2) on Railway so uploads survive redeploys.",
+      );
+    }
+    return;
+  }
   const body = fs.readFileSync(opts.absolutePath);
   await s3Client().send(
     new PutObjectCommand({

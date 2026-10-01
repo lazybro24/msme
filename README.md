@@ -87,5 +87,7 @@ npm run dev
 
 - `frontend/.env.local` → `NEXT_PUBLIC_API_URL=http://localhost:4000`
 - `backend/.env` → `PORT`, `DATABASE_URL`, `CORS_ORIGIN`, `AUTH_SECRET`
+- **Production uploads:** set Cloudflare R2 / S3 vars on Railway (`S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_ENDPOINT`) — local disk is wiped on every redeploy
+
 - First admin (one-time): set `BOOTSTRAP_ADMIN_EMAIL` + `BOOTSTRAP_ADMIN_PASSWORD`, start the API once, then remove the password from env — or run `npm run create-admin`
 - Admin login: `/3e8e287e2388/login`
