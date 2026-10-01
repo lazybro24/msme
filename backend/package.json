@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "prisma generate && tsc",
-    "start": "sh -c 'npx prisma migrate deploy || true; node dist/index.js'",
+    "start": "node scripts/start-prod.js",
     "db:baseline": "node scripts/baseline-migration.js",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",

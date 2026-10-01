@@ -1,0 +1,9 @@
+# Pin Node 20 — Nixpacks defaulted to nodejs_24 which can break Prisma/pg on Railway.
+[phases.setup]
+nixPkgs = ["nodejs_20", "npm-9_x", "openssl"]
+
+[phases.install]
+cmds = ["npm ci"]
+
+[start]
+cmd = "node scripts/start-prod.js"
