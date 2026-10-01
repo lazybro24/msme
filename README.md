@@ -84,7 +84,7 @@ npm run dev
 | Phase | Status |
 | --- | --- |
 | 1 Public site | In place |
-| 2 Applicant portal | Continuing (password auth; email OTP later; SMTP helper ready) |
+| 2 Applicant portal | Continuing (password auth + email OTP via Resend) |
 | 3 Secretariat / Jury | UI + demo API present; harden next with Postgres + uploads |
 
 ## Useful URLs
@@ -100,6 +100,6 @@ npm run dev
 ## Env files
 
 - `frontend/.env.local` → `NEXT_PUBLIC_API_URL=http://localhost:4000`
-- `backend/.env` → `PORT`, `DATABASE_URL`, `CORS_ORIGIN`, `SMTP_*`, `AUTH_SECRET`
+- `backend/.env` → `PORT`, `DATABASE_URL`, `CORS_ORIGIN`, `RESEND_API_KEY`, `AUTH_SECRET`
 - First admin (one-time): set `BOOTSTRAP_ADMIN_EMAIL` + `BOOTSTRAP_ADMIN_PASSWORD`, start the API once, then remove the password from env — or run `npm run create-admin`
 - Admin login: `/3e8e287e2388/login`
