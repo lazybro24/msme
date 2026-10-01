@@ -1,20 +1,57 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, use, useEffect, useState } from "react";
+import { FormEvent, use, useEffect, useMemo, useState } from "react";
 import { PortalShell, StatusPill, secretariatNav } from "@/components/portal/PortalShell";
 import { AuthGate } from "@/components/portal/AuthGate";
-import { API_URL, apiGet, apiPost } from "@/lib/api";
+import { apiGet, apiPost } from "@/lib/api";
 import { authFileUrl } from "@/lib/files";
+import { awardCategories } from "@/content/awards";
+
+type DraftJson = {
+  answers?: Record<string, string>;
+  overview?: Record<string, string>;
+  performance?: Record<string, string>;
+  signature?: Record<string, string>;
+  [key: string]: unknown;
+};
+
+type OrgProfile = {
+  legalName: string;
+  brandName?: string;
+  constitution: string;
+  established: string;
+  industry: string;
+  activity: string;
+  website?: string;
+  registeredAddress: string;
+  mysuruAddress: string;
+  pinCode: string;
+  udyam: string;
+  udyamDate: string;
+  classification: string;
+  pan: string;
+  gstin?: string;
+  cin?: string;
+  employees: string;
+  locations: string;
+  repName: string;
+  repDesignation: string;
+  repEmail: string;
+  repMobile: string;
+};
 
 type App = {
   applicationId: string;
   organisationName: string;
+  categoryCode?: string;
   categoryTitle: string;
   sector: string;
   msme: string;
   status: string;
   evidenceStrength?: string;
+  draftJson?: DraftJson;
+  submittedAt?: string;
 };
 
 type Doc = {
@@ -40,9 +77,76 @@ function fileHref(url?: string | null) {
   return authFileUrl(url);
 }
 
+function asAnswers(draft?: DraftJson | null): Record<string, string> {
+  if (!draft) return {};
+  if (draft.answers && typeof draft.answers === "object") {
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(draft.answers)) {
+      if (v == null) continue;
+      out[k] = String(v);
+    }
+    return out;
+  }
+  // Seed / legacy nested shape
+  const out: Record<string, string> = {};
+  const overview = draft.overview || {};
+  const signature = draft.signature || {};
+  const performance = draft.performance || {};
+  for (const [k, v] of Object.entries(overview)) out[`overview_${k}`] = String(v ?? "");
+  for (const [k, v] of Object.entries(signature)) out[`signature_${k}`] = String(v ?? "");
+  for (const [k, v] of Object.entries(performance)) out[k] = String(v ?? "");
+  return out;
+}
+
+function DisplayValue({ value }: { value?: string | null }) {
+  const text = (value || "").trim();
+  if (!text) return <span className="text-[#aaa]">—</span>;
+  return <span className="whitespace-pre-wrap">{text}</span>;
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="border border-black/10 bg-white p-5 sm:p-6">
+      <h2 className="font-display text-xl font-black italic uppercase">{title}</h2>
+      <div className="mt-4">{children}</div>
+    </section>
+  );
+}
+
+function FieldGrid({ rows }: { rows: [string, string | undefined | null][] }) {
+  return (
+    <dl className="grid gap-3 sm:grid-cols-2 text-sm">
+      {rows.map(([label, value]) => (
+        <div key={label} className="border-b border-black/5 pb-2">
+          <dt className="text-[10px] font-bold uppercase tracking-wide text-[#888]">{label}</dt>
+          <dd className="mt-1 font-medium text-[#1a1814]">
+            <DisplayValue value={value} />
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function NarrativeList({ rows }: { rows: [string, string | undefined | null][] }) {
+  return (
+    <div className="space-y-4">
+      {rows.map(([label, value]) => (
+        <div key={label}>
+          <p className="text-[10px] font-bold uppercase tracking-wide text-[#888]">{label}</p>
+          <p className="mt-1 text-sm leading-relaxed text-[#1a1814]">
+            <DisplayValue value={value} />
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function DetailInner({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [app, setApp] = useState<App | null>(null);
+  const [org, setOrg] = useState<OrgProfile | null>(null);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [mandatory, setMandatory] = useState<Mandatory[]>([]);
   const [showClarify, setShowClarify] = useState(false);
@@ -60,13 +164,39 @@ function DetailInner({ params }: { params: Promise<{ id: string }> }) {
       });
   }
 
+  async function loadApp() {
+    const d = await apiGet<{ application: App; organisation?: OrgProfile | null }>(
+      `/api/applications/${id}`,
+    );
+    setApp(d.application);
+    setOrg(d.organisation ?? null);
+  }
+
   useEffect(() => {
-    apiGet<{ application: App }>(`/api/applications/${id}`)
-      .then((d) => setApp(d.application))
-      .catch(() => setApp(null));
+    loadApp().catch(() => {
+      setApp(null);
+      setOrg(null);
+    });
     loadDocs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  const answers = useMemo(() => asAnswers(app?.draftJson), [app?.draftJson]);
+
+  const scorecard = useMemo(() => {
+    const cat =
+      awardCategories.find((c) => c.code === app?.categoryCode) ||
+      awardCategories.find((c) => c.title === app?.categoryTitle);
+    return cat?.criteria ?? [];
+  }, [app?.categoryCode, app?.categoryTitle]);
+
+  const perfMetrics = [
+    "Revenue (₹)",
+    "Profit / EBITDA (₹)",
+    "Employees",
+    "Customers / Clients",
+    "Locations / Markets",
+  ];
 
   async function onClarify(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -82,8 +212,7 @@ function DetailInner({ params }: { params: Promise<{ id: string }> }) {
       });
       setMsg("Clarification request sent");
       setShowClarify(false);
-      const refreshed = await apiGet<{ application: App }>(`/api/applications/${id}`);
-      setApp(refreshed.application);
+      await loadApp();
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Failed");
     }
@@ -115,6 +244,11 @@ function DetailInner({ params }: { params: Promise<{ id: string }> }) {
                 <p className="mt-1 text-sm text-[#666]">
                   {app.categoryTitle} · {app.sector} · {app.msme}
                 </p>
+                {app.submittedAt && (
+                  <p className="mt-1 text-xs text-[#888]">
+                    Submitted {new Date(app.submittedAt).toLocaleString()}
+                  </p>
+                )}
               </div>
               <StatusPill status={app.status.replaceAll("_", " ")} />
             </div>
@@ -149,7 +283,12 @@ function DetailInner({ params }: { params: Promise<{ id: string }> }) {
                 </div>
                 <div>
                   <label className="label">Title</label>
-                  <input name="title" className="input" required defaultValue="Additional information required" />
+                  <input
+                    name="title"
+                    className="input"
+                    required
+                    defaultValue="Additional information required"
+                  />
                 </div>
                 <div>
                   <label className="label">Message</label>
@@ -170,12 +309,167 @@ function DetailInner({ params }: { params: Promise<{ id: string }> }) {
             )}
           </div>
 
-          <div className="border border-black/10 bg-white p-5 sm:p-6">
+          <Section title="1. Business Profile">
+            {org ? (
+              <FieldGrid
+                rows={[
+                  ["Legal Business Name", org.legalName],
+                  ["Brand / Trade Name", org.brandName],
+                  ["Constitution", org.constitution],
+                  ["Established", org.established],
+                  ["Industry", org.industry],
+                  ["Activity", org.activity],
+                  ["Website", org.website],
+                  ["Udyam", org.udyam],
+                  ["Udyam date", org.udyamDate],
+                  ["Classification", org.classification],
+                  ["PAN", org.pan],
+                  ["GSTIN", org.gstin],
+                  ["CIN", org.cin],
+                  ["Employees", org.employees],
+                  ["Locations", org.locations],
+                  ["Registered address", org.registeredAddress],
+                  ["Mysuru address", org.mysuruAddress],
+                  ["PIN", org.pinCode],
+                  ["Representative", `${org.repName} · ${org.repDesignation}`],
+                  ["Contact", `${org.repEmail} · ${org.repMobile}`],
+                ]}
+              />
+            ) : (
+              <p className="text-sm text-[#666]">No business profile on file for this applicant.</p>
+            )}
+          </Section>
+
+          <Section title="2. Eligibility">
+            <ul className="space-y-2 text-sm">
+              {[
+                "Valid Udyam Registration",
+                "Substantial Mysuru District operations",
+                "Business currently operational",
+                "Willing to provide documentary evidence",
+              ].map((label, i) => (
+                <li
+                  key={label}
+                  className="flex items-center justify-between gap-3 border border-black/10 px-3 py-2"
+                >
+                  <span>{label}</span>
+                  <span className="text-xs font-bold uppercase tracking-wide text-[#555]">
+                    {answers[`eligibility_${i}`] === "yes" ? "Confirmed" : "Not confirmed"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </Section>
+
+          <Section title="3. Business Overview">
+            <NarrativeList
+              rows={[
+                ["Describe your business", answers.overview_describe],
+                ["Principal products or services", answers.overview_products],
+                ["Principal customers or markets", answers.overview_customers],
+                ["What differentiates your organisation?", answers.overview_differentiates],
+                ["Three most important achievements", answers.overview_achievements],
+              ]}
+            />
+          </Section>
+
+          <Section title="4. Performance (confidential)">
+            <div className="overflow-x-auto">
+              <table className="min-w-[640px] w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-black/10 text-[10px] uppercase tracking-[0.12em] text-[#888]">
+                    <th className="py-2 pr-4">Metric</th>
+                    <th className="py-2 pr-4">FY-3</th>
+                    <th className="py-2 pr-4">FY-2</th>
+                    <th className="py-2">FY-1</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {perfMetrics.map((m, mi) => (
+                    <tr key={m} className="border-b border-black/5">
+                      <td className="py-2 pr-4 font-medium">{m}</td>
+                      {[0, 1, 2].map((yi) => (
+                        <td key={yi} className="py-2 pr-4">
+                          <DisplayValue value={answers[`perf_m${mi}_y${yi}`]} />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-4">
+              <NarrativeList
+                rows={[
+                  ["Major investment", answers.perf_investment],
+                  ["New markets entered", answers.perf_markets],
+                  ["Capacity expansion", answers.perf_capacity],
+                  ["New products / services", answers.perf_products],
+                  ["Export contribution", answers.perf_export],
+                ]}
+              />
+            </div>
+          </Section>
+
+          <Section title="5. Category Responses">
+            {scorecard.length ? (
+              <NarrativeList
+                rows={scorecard.map(
+                  (c, i) => [c.name, answers[`category_q_${i}`] || ""] as [string, string],
+                )}
+              />
+            ) : (
+              <p className="text-sm text-[#666]">No category scorecard questions found.</p>
+            )}
+          </Section>
+
+          <Section title="6. Mysuru Contribution">
+            <NarrativeList
+              rows={[
+                ["Contribution to Mysuru", answers.mysuru_contribution],
+                ["Employees based in Mysuru", answers.mysuru_employees],
+                ["Local vendors / suppliers", answers.mysuru_vendors],
+                ["Local sourcing", answers.mysuru_sourcing],
+                ["Local employment initiatives", answers.mysuru_employment],
+                ["Community contribution", answers.mysuru_community],
+                ["Mysuru business ecosystem", answers.mysuru_ecosystem],
+              ]}
+            />
+          </Section>
+
+          <Section title="7. Signature Achievement">
+            <NarrativeList
+              rows={[
+                ["Achievement", answers.signature_achievement],
+                ["Why it matters", answers.signature_why],
+              ]}
+            />
+          </Section>
+
+          <Section title="8. Declaration">
+            <FieldGrid
+              rows={[
+                ["Authorized Signatory", answers.decl_signatory],
+                ["Designation", answers.decl_designation],
+                ["Place", answers.decl_place],
+                ["Date", answers.decl_date],
+                [
+                  "Declaration accepted",
+                  answers.decl_agree === "yes" ? "Yes" : "No / not recorded",
+                ],
+              ]}
+            />
+          </Section>
+
+          <div id="documents" className="border border-black/10 bg-white p-5 sm:p-6">
             <div className="flex flex-wrap items-end justify-between gap-2">
               <div>
-                <h2 className="font-display text-xl font-black italic uppercase">Uploaded documents</h2>
+                <h2 className="font-display text-xl font-black italic uppercase">
+                  9. Uploaded documents
+                </h2>
                 <p className="mt-1 text-xs text-[#666]">
-                  Mandatory {mandatory.filter((m) => m.done).length}/{mandatory.length} complete
+                  Mandatory {mandatory.filter((m) => m.done).length}/{mandatory.length} complete ·
+                  Open any file to view or download
                 </p>
               </div>
               <button type="button" className="btn-ghost !px-3 !py-1 text-xs" onClick={loadDocs}>
@@ -203,7 +497,7 @@ function DetailInner({ params }: { params: Promise<{ id: string }> }) {
                       rel="noreferrer"
                       className="text-xs font-bold uppercase tracking-wide text-[var(--brand-gold-dark)] underline-offset-2 hover:underline"
                     >
-                      Open
+                      View / download
                     </a>
                   ) : (
                     <span className="text-xs text-[#aaa]">—</span>
@@ -229,6 +523,7 @@ function DetailInner({ params }: { params: Promise<{ id: string }> }) {
                           {d.evidenceType}
                           {d.period ? ` · ${d.period}` : ""}
                           {d.fileName ? ` · ${d.fileName}` : ""}
+                          {d.description ? ` · ${d.description}` : ""}
                         </p>
                       </div>
                       {d.fileUrl ? (
@@ -254,10 +549,10 @@ function DetailInner({ params }: { params: Promise<{ id: string }> }) {
           </div>
         </div>
 
-        <div className="space-y-3 border border-black/10 bg-white p-5">
-          <Link href="/3e8e287e2388/verification" className="btn-primary w-full">
-            Evidence Verification
-          </Link>
+        <div className="space-y-3 border border-black/10 bg-white p-5 lg:sticky lg:top-4 lg:self-start">
+          <a href="#documents" className="btn-primary w-full text-center">
+            Jump to documents
+          </a>
           <button type="button" className="btn-secondary w-full" onClick={() => setShowClarify(true)}>
             Request Clarification
           </button>
@@ -296,8 +591,7 @@ function DetailInner({ params }: { params: Promise<{ id: string }> }) {
                 try {
                   await apiPost(`/api/admin/applications/${id}/status`, { status, reason });
                   setMsg(`Status set to ${status}`);
-                  const refreshed = await apiGet<{ application: App }>(`/api/applications/${id}`);
-                  setApp(refreshed.application);
+                  await loadApp();
                 } catch (err) {
                   setMsg(err instanceof Error ? err.message : "Status change failed");
                 }
@@ -317,8 +611,7 @@ function DetailInner({ params }: { params: Promise<{ id: string }> }) {
                 try {
                   await apiPost(`/api/admin/applications/${id}/reopen`, { reason });
                   setMsg("Application reopened as draft");
-                  const refreshed = await apiGet<{ application: App }>(`/api/applications/${id}`);
-                  setApp(refreshed.application);
+                  await loadApp();
                 } catch (err) {
                   setMsg(err instanceof Error ? err.message : "Reopen failed");
                 }
@@ -347,4 +640,3 @@ export default function SecretariatApplicationDetailPage({
     </AuthGate>
   );
 }
-

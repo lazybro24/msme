@@ -9,6 +9,7 @@ import {
   isProfileComplete,
   nextApplicationId,
   notify,
+  orgToProfile,
 } from "../lib/users";
 
 export const applicationsRouter = Router();
@@ -78,7 +79,18 @@ applicationsRouter.get("/:applicationId", requireAuth, async (req: AuthRequest, 
   if (!isStaff && !isOwner && !isAssignedJury) {
     return res.status(403).json({ error: "Forbidden" });
   }
-  res.json({ application: appToApi(app), aggregation: null });
+
+  const payload: Record<string, unknown> = {
+    application: appToApi(app),
+    aggregation: null,
+  };
+
+  if (isStaff) {
+    const org = await prisma.organisation.findUnique({ where: { ownerId: app.applicantId } });
+    payload.organisation = orgToProfile(org);
+  }
+
+  res.json(payload);
 });
 
 applicationsRouter.post(
