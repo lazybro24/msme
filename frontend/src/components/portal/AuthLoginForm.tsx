@@ -4,6 +4,7 @@ import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { apiPost, setSession, clearSession, type AuthUser } from "@/lib/api";
 import { useToast } from "@/components/ui/Toast";
+import { PasswordField } from "@/components/ui/PasswordField";
 import { cn } from "@/lib/utils";
 
 type LoginStart =
@@ -183,7 +184,7 @@ export function AuthLoginForm({
 
   return (
     <div className="page-awards-bg page-awards-bg--cream flex min-h-screen items-center justify-center px-4 py-12">
-      <div className="w-full max-w-md border border-black/10 bg-white p-6 sm:p-8">
+      <div className="auth-form-card w-full max-w-md border border-black/10 p-6 sm:p-8">
         <Link
           href={homeHref}
           className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--brand-gold-dark)] hover:underline"
@@ -226,16 +227,14 @@ export function AuthLoginForm({
                   onChange={(e) => setEmail(e.target.value)}
                 />
               </div>
-              <div>
-                <label className="label">Password</label>
-                <input
-                  className={cn("input", error && "input-error")}
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
+              <PasswordField
+                label="Password"
+                required
+                error={Boolean(error)}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+              />
             </>
           ) : (
             <div>

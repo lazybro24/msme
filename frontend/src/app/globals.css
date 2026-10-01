@@ -632,7 +632,16 @@ h3.type-scale {
 
 .awards-svg-bg::before,
 .page-awards-bg::before {
-  content: none;
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.14;
+  background-image: url("/patterns/awards-light.svg");
+  background-repeat: repeat;
+  background-size: 100px 100px;
+  background-position: 0 0;
 }
 
 .awards-svg-bg > *,
@@ -648,7 +657,34 @@ h3.type-scale {
 }
 
 .page-awards-bg--cream::before {
-  content: none;
+  content: "";
+  opacity: 0.16;
+  background-size: 92px 92px;
+}
+
+/* Auth / register cards — awards watermark inside the white panel */
+.auth-form-card {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background-color: #ffffff;
+}
+
+.auth-form-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.08;
+  background-image: url("/patterns/awards-light.svg");
+  background-repeat: repeat;
+  background-size: 72px 72px;
+}
+
+.auth-form-card > * {
+  position: relative;
+  z-index: 1;
 }
 
 .feature-tile {

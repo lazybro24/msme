@@ -32,7 +32,7 @@ export default function ForgotPasswordPage() {
 
   return (
     <div className="page-awards-bg page-awards-bg--cream flex min-h-screen items-center justify-center px-4 py-12">
-      <div className="w-full max-w-md border border-black/10 bg-white p-6 sm:p-8">
+      <div className="auth-form-card w-full max-w-md border border-black/10 p-6 sm:p-8">
         <Link href="/nominate/login" className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--brand-gold-dark)] hover:underline">
           ← Back to login
         </Link>
