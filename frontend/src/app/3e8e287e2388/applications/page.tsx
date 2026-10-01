@@ -184,6 +184,12 @@ function ApplicationsInner() {
               </div>
               {canVerify(a) && (
                 <div className="mt-4 flex flex-wrap gap-2">
+                  <Link
+                    href={`/3e8e287e2388/applications/${a.applicationId}`}
+                    className="btn-primary"
+                  >
+                    View application
+                  </Link>
                   <button
                     type="button"
                     className="btn-gold"
@@ -203,6 +209,16 @@ function ApplicationsInner() {
                   >
                     Not verify
                   </button>
+                </div>
+              )}
+              {!canVerify(a) && (
+                <div className="mt-4">
+                  <Link
+                    href={`/3e8e287e2388/applications/${a.applicationId}`}
+                    className="btn-primary"
+                  >
+                    View application
+                  </Link>
                 </div>
               )}
             </div>
