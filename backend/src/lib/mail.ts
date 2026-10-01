@@ -1,13 +1,10 @@
 import crypto from "crypto";
 import dns from "dns";
+import { promisify } from "util";
 import nodemailer from "nodemailer";
+import type SMTPTransport from "nodemailer/lib/smtp-transport";
 
-// Railway / many hosts fail Gmail over IPv6 (ENETUNREACH :587). Prefer IPv4.
-try {
-  dns.setDefaultResultOrder("ipv4first");
-} catch {
-  /* Node < 17 */
-}
+const lookup4 = promisify(dns.lookup);
 
 type SendMailInput = {
   to: string;
@@ -16,7 +13,7 @@ type SendMailInput = {
   html?: string;
 };
 
-const SMTP_TIMEOUT_MS = Number(process.env.SMTP_TIMEOUT_MS || 8000);
+const SMTP_TIMEOUT_MS = Number(process.env.SMTP_TIMEOUT_MS || 10000);
 
 export function smtpConfigured() {
   const host = process.env.SMTP_HOST?.trim() || "";
@@ -39,11 +36,14 @@ export function allowDevMailCodes() {
   return process.env.OTP_DEV_EXPOSE !== "false";
 }
 
-function transporter() {
+/** Resolve host to IPv4 only — Railway often cannot reach Gmail via IPv6 (ENETUNREACH). */
+async function createIpv4Transporter() {
+  const hostname = (process.env.SMTP_HOST || "smtp.gmail.com").trim();
   const port = Number(process.env.SMTP_PORT || 587);
-  // `family: 4` forces IPv4 (avoids Gmail ENETUNREACH on Railway IPv6).
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
+  const { address } = await lookup4(hostname, { family: 4 });
+
+  const options: SMTPTransport.Options = {
+    host: address, // connect to IPv4 literal
     port,
     secure: port === 465,
     auth: {
@@ -53,8 +53,16 @@ function transporter() {
     connectionTimeout: SMTP_TIMEOUT_MS,
     greetingTimeout: SMTP_TIMEOUT_MS,
     socketTimeout: SMTP_TIMEOUT_MS,
-    family: 4,
-  } as Parameters<typeof nodemailer.createTransport>[0]);
+    tls: {
+      // SNI / cert must match the real hostname, not the IP
+      servername: hostname,
+      rejectUnauthorized: true,
+    },
+    name: hostname,
+  };
+
+  console.info(`[mail] SMTP connecting via IPv4 ${address}:${port} (${hostname})`);
+  return nodemailer.createTransport(options);
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -83,7 +91,7 @@ export async function sendMail(
   }
 
   try {
-    const tx = transporter();
+    const tx = await createIpv4Transporter();
     await withTimeout(
       tx.sendMail({
         from: process.env.SMTP_FROM,
@@ -94,7 +102,7 @@ export async function sendMail(
           input.html ??
           `<p style="font-family:Arial,sans-serif;line-height:1.5">${input.text.replace(/\n/g, "<br/>")}</p>`,
       }),
-      SMTP_TIMEOUT_MS + 2000,
+      SMTP_TIMEOUT_MS + 3000,
       "SMTP send",
     );
     return { sent: true };
