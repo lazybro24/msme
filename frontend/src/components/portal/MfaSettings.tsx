@@ -117,8 +117,8 @@ export function MfaSettings({
       </div>
 
       <p className="text-sm text-[#555]">
-        Protect your account with Google Authenticator. After email OTP, you will also enter a
-        6-digit code from the app.
+        Protect your account with Google Authenticator. When MFA is enabled, you will enter a
+        6-digit code from the app after your password.
       </p>
 
       <p className="mt-3 text-sm font-semibold text-[#1a1814]">

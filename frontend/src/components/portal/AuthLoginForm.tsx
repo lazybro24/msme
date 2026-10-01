@@ -7,20 +7,9 @@ import { useToast } from "@/components/ui/Toast";
 import { PasswordField } from "@/components/ui/PasswordField";
 import { cn } from "@/lib/utils";
 
-type LoginStart =
-  | {
-      otpRequired: true;
-      purpose: "LOGIN" | "REGISTER";
-      challengeId: string;
-      message: string;
-      demoOtp?: string;
-      email?: string;
-    }
-  | { token: string; user: AuthUser };
-
-type OtpVerifyResult =
+type LoginResult =
   | { authenticatorRequired: true; challengeId: string; message: string; email?: string }
-  | { token: string; user: AuthUser };
+  | { token: string; user: AuthUser; message?: string };
 
 export function AuthLoginForm({
   title,
@@ -43,12 +32,6 @@ export function AuthLoginForm({
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [otp, setOtp] = useState<{
-    challengeId: string;
-    code: string;
-    hint: string;
-    purpose: "LOGIN" | "REGISTER";
-  } | null>(null);
   const [authenticator, setAuthenticator] = useState<{
     challengeId: string;
     code: string;
@@ -86,47 +69,17 @@ export function AuthLoginForm({
         return;
       }
 
-      if (otp) {
-        const data = await apiPost<OtpVerifyResult>(
-          "/api/auth/verify-otp",
-          { challengeId: otp.challengeId, code: otp.code, purpose: otp.purpose },
-          false,
-        );
-        if ("authenticatorRequired" in data && data.authenticatorRequired) {
-          setAuthenticator({
-            challengeId: data.challengeId,
-            code: "",
-            hint: data.message,
-          });
-          setOtp(null);
-          toast.push({
-            title: "Google Authenticator",
-            description: "Enter the 6-digit code from your authenticator app",
-            tone: "info",
-          });
-          setBusy(false);
-          return;
-        }
-        if ("token" in data) {
-          await finishLogin(data.token, data.user);
-        }
-        return;
-      }
+      const data = await apiPost<LoginResult>("/api/auth/login", { email, password }, false);
 
-      const data = await apiPost<LoginStart>("/api/auth/login", { email, password }, false);
-
-      if ("otpRequired" in data && data.otpRequired) {
-        setOtp({
+      if ("authenticatorRequired" in data && data.authenticatorRequired) {
+        setAuthenticator({
           challengeId: data.challengeId,
-          code: data.demoOtp || "",
+          code: "",
           hint: data.message,
-          purpose: data.purpose || "LOGIN",
         });
         toast.push({
           title: "Account found",
-          description: data.demoOtp
-            ? `Local demo code: ${data.demoOtp}`
-            : "Enter the verification code we emailed you",
+          description: "Enter the 6-digit code from Google Authenticator",
           tone: "info",
         });
         setBusy(false);
@@ -144,41 +97,6 @@ export function AuthLoginForm({
       setBusy(false);
     }
   }
-
-  async function resend() {
-    if (!otp) return;
-    setBusy(true);
-    setError("");
-    try {
-      const data = await apiPost<{
-        challengeId: string;
-        message: string;
-        demoOtp?: string;
-        purpose: "LOGIN" | "REGISTER";
-      }>("/api/auth/resend-otp", { challengeId: otp.challengeId }, false);
-      setOtp({
-        challengeId: data.challengeId,
-        code: data.demoOtp || "",
-        hint: data.message,
-        purpose: data.purpose || otp.purpose,
-      });
-      toast.push({
-        title: "Code resent",
-        description: data.demoOtp ? `Demo code: ${data.demoOtp}` : data.message,
-        tone: "info",
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not resend");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const stepLabel = authenticator
-    ? "Verify authenticator"
-    : otp
-      ? "Verify & continue"
-      : "Login";
 
   return (
     <div className="page-awards-bg page-awards-bg--cream flex min-h-screen items-center justify-center px-4 py-12">
@@ -213,7 +131,7 @@ export function AuthLoginForm({
               />
               <p className="mt-2 text-xs text-[#888]">{authenticator.hint}</p>
             </div>
-          ) : !otp ? (
+          ) : (
             <>
               <div>
                 <label className="label">Email</label>
@@ -234,27 +152,6 @@ export function AuthLoginForm({
                 autoComplete="current-password"
               />
             </>
-          ) : (
-            <div>
-              <label className="label">Email verification code</label>
-              <input
-                className={cn("input", error && "input-error")}
-                required
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                value={otp.code}
-                onChange={(e) => setOtp({ ...otp, code: e.target.value })}
-              />
-              <p className="mt-2 text-xs text-[#888]">{otp.hint}</p>
-              <button
-                type="button"
-                className="mt-2 text-xs font-semibold text-[var(--brand-gold-dark)] underline-offset-2 hover:underline"
-                onClick={resend}
-                disabled={busy}
-              >
-                Resend code
-              </button>
-            </div>
           )}
           {error && <p className="text-sm text-red-700">{error}</p>}
           <button
@@ -262,11 +159,11 @@ export function AuthLoginForm({
             className={cn("btn-primary w-full", busy && "btn-loading")}
             disabled={busy}
           >
-            {busy ? "Please wait…" : stepLabel}
+            {busy ? "Please wait…" : authenticator ? "Verify authenticator" : "Login"}
           </button>
         </form>
         <p className="mt-4 text-center text-xs text-[#888]">
-          Password + email OTP required. If MFA is enabled, Google Authenticator is required too.
+          Sign in with email and password. If MFA is enabled, Google Authenticator is required too.
         </p>
       </div>
     </div>

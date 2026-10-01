@@ -6,24 +6,16 @@ import { useRouter } from "next/navigation";
 import { apiPost, setSession, type AuthUser } from "@/lib/api";
 import { PasswordField } from "@/components/ui/PasswordField";
 
-type RegisterStart = {
-  otpRequired: true;
-  purpose: "REGISTER";
-  challengeId: string;
-  message: string;
-  demoOtp?: string;
-  email: string;
+type RegisterResult = {
+  token: string;
+  user: AuthUser;
+  message?: string;
 };
 
 export default function NominateRegisterPage() {
   const router = useRouter();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [otp, setOtp] = useState<{
-    challengeId: string;
-    code: string;
-    hint: string;
-  } | null>(null);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -32,17 +24,6 @@ export default function NominateRegisterPage() {
     const fd = new FormData(e.currentTarget);
 
     try {
-      if (otp) {
-        const data = await apiPost<{ token: string; user: AuthUser }>(
-          "/api/auth/verify-otp",
-          { challengeId: otp.challengeId, code: otp.code, purpose: "REGISTER" },
-          false,
-        );
-        setSession(data.token, data.user);
-        router.push("/nominate/profile");
-        return;
-      }
-
       const password = String(fd.get("password"));
       const confirm = String(fd.get("confirm"));
       if (password !== confirm) {
@@ -51,7 +32,7 @@ export default function NominateRegisterPage() {
         return;
       }
 
-      const data = await apiPost<RegisterStart>(
+      const data = await apiPost<RegisterResult>(
         "/api/auth/register",
         {
           fullName: fd.get("fullName"),
@@ -64,13 +45,8 @@ export default function NominateRegisterPage() {
         false,
       );
 
-      if (data.otpRequired) {
-        setOtp({
-          challengeId: data.challengeId,
-          code: data.demoOtp || "",
-          hint: data.message,
-        });
-      }
+      setSession(data.token, data.user);
+      router.push("/nominate/profile");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Registration failed";
       setError(message);
@@ -88,69 +64,49 @@ export default function NominateRegisterPage() {
         >
           ← Nomination
         </Link>
-        <h1 className="mt-3 font-display text-3xl font-black italic uppercase">
-          {otp ? "Verify email" : "Create Account"}
-        </h1>
+        <h1 className="mt-3 font-display text-3xl font-black italic uppercase">Create Account</h1>
         <p className="mt-2 text-sm text-[#666]">
-          {otp
-            ? "Enter the 6-digit code sent to your email to finish registration."
-            : "After you submit, we'll email a one-time code to verify your address."}
+          Register with your email and password. If an account already exists, you will be asked to
+          log in instead.
         </p>
         <form className="mt-6 space-y-3" onSubmit={onSubmit}>
-          {!otp ? (
-            <>
-              {[
-                ["fullName", "Full Name"],
-                ["designation", "Designation"],
-                ["organisationName", "Business / Organisation Name"],
-                ["mobile", "Mobile Number"],
-                ["email", "Email Address"],
-              ].map(([name, label]) => (
-                <div key={name}>
-                  <label className="label">{label}</label>
-                  <input
-                    className="input"
-                    name={name}
-                    required
-                    type={name === "email" ? "email" : "text"}
-                  />
-                </div>
-              ))}
-              <PasswordField
-                label="Password"
-                name="password"
-                required
-                minLength={8}
-                autoComplete="new-password"
-                error={Boolean(error)}
-              />
-              <PasswordField
-                label="Confirm Password"
-                name="confirm"
-                required
-                minLength={8}
-                autoComplete="new-password"
-                error={Boolean(error)}
-              />
-              <label className="flex items-start gap-2 text-sm">
-                <input type="checkbox" required className="mt-1" />
-                I agree to the Privacy Policy and Terms of Use.
-              </label>
-            </>
-          ) : (
-            <div>
-              <label className="label">Verification code</label>
+          {[
+            ["fullName", "Full Name"],
+            ["designation", "Designation"],
+            ["organisationName", "Business / Organisation Name"],
+            ["mobile", "Mobile Number"],
+            ["email", "Email Address"],
+          ].map(([name, label]) => (
+            <div key={name}>
+              <label className="label">{label}</label>
               <input
                 className="input"
+                name={name}
                 required
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                value={otp.code}
-                onChange={(e) => setOtp({ ...otp, code: e.target.value })}
+                type={name === "email" ? "email" : "text"}
               />
-              <p className="mt-2 text-xs text-[#888]">{otp.hint}</p>
             </div>
-          )}
+          ))}
+          <PasswordField
+            label="Password"
+            name="password"
+            required
+            minLength={8}
+            autoComplete="new-password"
+            error={Boolean(error)}
+          />
+          <PasswordField
+            label="Confirm Password"
+            name="confirm"
+            required
+            minLength={8}
+            autoComplete="new-password"
+            error={Boolean(error)}
+          />
+          <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" required className="mt-1" />
+            I agree to the Privacy Policy and Terms of Use.
+          </label>
           {error && (
             <p className="text-sm text-red-700">
               {error}
@@ -165,7 +121,7 @@ export default function NominateRegisterPage() {
             </p>
           )}
           <button type="submit" className="btn-primary w-full" disabled={busy}>
-            {busy ? "Please wait…" : otp ? "Verify & continue" : "Create Account"}
+            {busy ? "Please wait…" : "Create Account"}
           </button>
         </form>
         <p className="mt-4 text-center text-sm">

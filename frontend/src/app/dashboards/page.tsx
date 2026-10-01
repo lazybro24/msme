@@ -52,7 +52,7 @@ export default function DashboardsPage() {
       <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
         <p className="max-w-2xl text-sm text-[#555]">
           Sign in to your portal with the account credentials issued by the Awards Secretariat.
-          Do not share passwords. Email OTP is required after password login.
+          Do not share passwords. If MFA is enabled, Google Authenticator is required after password login.
         </p>
 
         <div className="mt-8 grid gap-4 sm:grid-cols-2">

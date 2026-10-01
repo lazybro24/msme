@@ -143,7 +143,7 @@ Scorecards live in versioned JSON (`src/content/scorecards/*.ts`) so jury UI and
 
 ## 7. Phase 2 — Applicant & nomination portal
 
-- Register/login (email OTP required; mobile OTP preferred)
+- Register/login (email + password; optional Google Authenticator MFA)
 - Dashboard: applications 0/2, profile %, documents, status
 - Business profile once; eligibility green/amber/red; category recommender
 - 9 open categories; MSME of the Year locked

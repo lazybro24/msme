@@ -13,12 +13,6 @@ import {
 } from "../lib/auth";
 import { hashPassword, verifyPassword } from "../lib/password";
 import { MIN_PASSWORD_LENGTH } from "../lib/passwordPolicy";
-import {
-  allowDevMailCodes,
-  mailConfigured,
-  sendWelcomeMail,
-} from "../lib/mail";
-import { issueEmailOtp, verifyEmailOtp } from "../lib/otp";
 import { audit, notify, toAuthUser } from "../lib/users";
 import { juryPhotoUpload } from "../lib/upload";
 import { persistUploadedFile, publicFilePath } from "../lib/storage";
@@ -83,26 +77,15 @@ authRouter.post("/register", async (req, res) => {
   await audit({
     actorId: user.id,
     role: "APPLICANT",
-    action: "ACCOUNT_CREATED_PENDING_OTP",
+    action: "ACCOUNT_CREATED",
   });
+  void notify(user.id, "Welcome", "Your applicant account is ready.").catch(() => undefined);
 
-  const otp = await issueEmailOtp({
-    email: user.email,
-    userId: user.id,
-    purpose: "REGISTER",
-  });
-  if (!otp.ok) {
-    await prisma.user.delete({ where: { id: user.id } }).catch(() => undefined);
-    return res.status(503).json({ error: otp.error });
-  }
-
+  const token = await createToken(user.id, true);
   res.status(201).json({
-    otpRequired: true,
-    purpose: "REGISTER",
-    challengeId: otp.challengeId,
-    message: otp.message,
-    demoOtp: otp.demoOtp,
-    email: user.email,
+    token,
+    user: publicUser(toAuthUser(user)),
+    message: "Account created. You are signed in.",
   });
 });
 
@@ -124,92 +107,34 @@ authRouter.post("/login", async (req, res) => {
     return res.status(403).json({ error: "Account deactivated" });
   }
 
-  const otp = await issueEmailOtp({
-    email: user.email,
-    userId: user.id,
-    purpose: "LOGIN",
-  });
-  if (!otp.ok) {
-    return res.status(503).json({ error: otp.error });
-  }
-
-  res.json({
-    otpRequired: true,
-    purpose: "LOGIN",
-    challengeId: otp.challengeId,
-    message: "Account found. Enter the verification code we sent to your email.",
-    demoOtp: otp.demoOtp,
-    email: user.email,
-  });
-});
-
-authRouter.post("/verify-otp", async (req, res) => {
-  const schema = z.object({
-    challengeId: z.string().min(8),
-    code: z.string().min(4).max(8),
-    purpose: z.enum(["REGISTER", "LOGIN"]),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-
-  const result = await verifyEmailOtp(parsed.data);
-  if (!result.ok) return res.status(401).json({ error: result.error });
-
-  const user = result.userId
-    ? await prisma.user.findUnique({ where: { id: result.userId } })
-    : await prisma.user.findUnique({ where: { email: result.email } });
-  if (!user || user.active === false) {
-    return res.status(400).json({ error: "User not found" });
-  }
-
-  // Google Authenticator required when MFA is enabled with a real TOTP secret
-  if (
-    parsed.data.purpose === "LOGIN" &&
-    user.mfaEnabled &&
-    isRealTotpSecret(user.mfaSecret)
-  ) {
+  // Google Authenticator when MFA is enabled
+  if (user.mfaEnabled && isRealTotpSecret(user.mfaSecret)) {
     const mfaChallenge = crypto.randomBytes(24).toString("hex");
     pendingMfa.set(mfaChallenge, user.id);
     setTimeout(() => pendingMfa.delete(mfaChallenge), 10 * 60 * 1000);
     await audit({
       actorId: user.id,
       role: user.roles[0],
-      action: "LOGIN_OTP_VERIFIED_AWAITING_AUTHENTICATOR",
+      action: "LOGIN_AWAITING_AUTHENTICATOR",
     });
     return res.json({
       authenticatorRequired: true,
       challengeId: mfaChallenge,
-      message: "Enter the 6-digit code from Google Authenticator to finish signing in.",
+      message: "Account found. Enter the 6-digit code from Google Authenticator.",
       email: user.email,
     });
   }
 
   const token = await createToken(user.id, true);
-  const authUser = toAuthUser(user);
-
-  if (parsed.data.purpose === "REGISTER") {
-    void notify(user.id, "Welcome", "Your applicant account is ready.").catch(() => undefined);
-    void audit({
-      actorId: user.id,
-      role: user.roles[0],
-      action: "REGISTER_OTP_VERIFIED",
-    }).catch(() => undefined);
-    void sendWelcomeMail(user.email, user.fullName, user.orgName);
-  } else {
-    void audit({
-      actorId: user.id,
-      role: user.roles[0],
-      action: "LOGIN_OTP_VERIFIED",
-    }).catch(() => undefined);
-  }
-
+  await audit({
+    actorId: user.id,
+    role: user.roles[0],
+    action: "LOGIN_SUCCESS",
+  });
   res.json({
     token,
-    user: publicUser(authUser),
-    message:
-      parsed.data.purpose === "REGISTER"
-        ? "Account verified. Welcome."
-        : "Signed in successfully.",
+    user: publicUser(toAuthUser(user)),
+    message: "Account found. Signed in successfully.",
   });
 });
 
@@ -246,65 +171,6 @@ authRouter.post("/verify-totp", async (req, res) => {
     token,
     user: publicUser(toAuthUser(user)),
     message: "Signed in successfully.",
-  });
-});
-
-/** Alias for older MFA clients — same as verify-otp LOGIN */
-authRouter.post("/mfa", async (req, res) => {
-  const schema = z.object({
-    challengeId: z.string(),
-    code: z.string().min(4),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-
-  req.body = { ...parsed.data, purpose: "LOGIN" };
-  // Reuse verify-otp logic via internal call pattern
-  const result = await verifyEmailOtp({
-    challengeId: parsed.data.challengeId,
-    code: parsed.data.code,
-    purpose: "LOGIN",
-  });
-  if (!result.ok) return res.status(401).json({ error: result.error });
-  const user = result.userId
-    ? await prisma.user.findUnique({ where: { id: result.userId } })
-    : null;
-  if (!user) return res.status(400).json({ error: "User not found" });
-  const token = await createToken(user.id, true);
-  await audit({
-    actorId: user.id,
-    role: user.roles[0],
-    action: "LOGIN_OTP_VERIFIED",
-  });
-  res.json({ token, user: publicUser(toAuthUser(user)) });
-});
-
-authRouter.post("/resend-otp", async (req, res) => {
-  const schema = z.object({
-    challengeId: z.string().min(8),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-
-  const row = await prisma.emailOtp.findUnique({ where: { challenge: parsed.data.challengeId } });
-  if (!row || row.consumedAt) {
-    return res.status(400).json({ error: "Invalid challenge. Start login/register again." });
-  }
-
-  const otp = await issueEmailOtp({
-    email: row.email,
-    userId: row.userId ?? undefined,
-    purpose: row.purpose as "REGISTER" | "LOGIN" | "RESET",
-  });
-  if (!otp.ok) return res.status(503).json({ error: otp.error });
-
-  res.json({
-    otpRequired: true,
-    purpose: row.purpose,
-    challengeId: otp.challengeId,
-    message: otp.message,
-    demoOtp: otp.demoOtp,
-    email: row.email,
   });
 });
 
@@ -539,13 +405,6 @@ authRouter.post("/change-password", requireAuth, async (req: AuthRequest, res) =
     action: "PASSWORD_CHANGED_SELF",
   });
   res.json({ ok: true, message: "Password updated." });
-});
-
-authRouter.get("/mail-status", (_req, res) => {
-  res.json({
-    resendConfigured: mailConfigured(),
-    otpDevExpose: allowDevMailCodes(),
-  });
 });
 
 authRouter.get("/demo-users", async (_req, res) => {

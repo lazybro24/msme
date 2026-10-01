@@ -17,7 +17,7 @@ msme/
 | Area | Packages |
 | --- | --- |
 | Frontend | Next.js, React, Tailwind, Framer Motion |
-| Backend | Express, Zod, Prisma, **Resend** (email OTP), **bcryptjs**, **multer** (uploads) |
+| Backend | Express, Zod, Prisma, **bcryptjs**, **multer** (uploads), **otplib** (optional MFA) |
 
 Run once per machine:
 
@@ -36,23 +36,9 @@ npx prisma generate
 | --- | --- | --- |
 | **Node.js 18+** | Yes | Run frontend + backend |
 | **PostgreSQL 14+** | Yes for Phase 2/3 persistence | Real applications, evidence, jury scores |
-| **Resend API key** | For real email OTP | Register / login verification codes |
 | Docker Desktop | Optional | Easiest way to run Postgres locally |
 
-**Auth:** Email + password, then **email OTP** on every register/login. Set `RESEND_API_KEY` for real mail.
-
-### Email (Resend — required for real OTP)
-
-Edit `backend/.env`:
-
-```
-RESEND_API_KEY=re_xxxxxxxx
-RESEND_FROM=Mysuru MSME Awards <onboarding@resend.dev>
-OTP_DEV_EXPOSE=true
-```
-
-Verify your domain at resend.com/domains to email any applicant (not only your Resend account email).  
-Without Resend, local/dev can show demo OTP when `OTP_DEV_EXPOSE=true`.
+**Auth:** Email + password. Optional Google Authenticator MFA from profile settings.
 
 ### PostgreSQL (Neon)
 
@@ -84,7 +70,7 @@ npm run dev
 | Phase | Status |
 | --- | --- |
 | 1 Public site | In place |
-| 2 Applicant portal | Continuing (password auth + email OTP via Resend) |
+| 2 Applicant portal | Continuing (email + password auth; optional authenticator MFA) |
 | 3 Secretariat / Jury | UI + demo API present; harden next with Postgres + uploads |
 
 ## Useful URLs
@@ -100,6 +86,6 @@ npm run dev
 ## Env files
 
 - `frontend/.env.local` → `NEXT_PUBLIC_API_URL=http://localhost:4000`
-- `backend/.env` → `PORT`, `DATABASE_URL`, `CORS_ORIGIN`, `RESEND_API_KEY`, `AUTH_SECRET`
+- `backend/.env` → `PORT`, `DATABASE_URL`, `CORS_ORIGIN`, `AUTH_SECRET`
 - First admin (one-time): set `BOOTSTRAP_ADMIN_EMAIL` + `BOOTSTRAP_ADMIN_PASSWORD`, start the API once, then remove the password from env — or run `npm run create-admin`
 - Admin login: `/3e8e287e2388/login`

@@ -93,8 +93,7 @@ export async function mountApiRoutes(app: Express): Promise<void> {
 
   app.use("/api/auth/login", authLimiter);
   app.use("/api/auth/register", authLimiter);
-  app.use("/api/auth/verify-otp", authLimiter);
-  app.use("/api/auth/resend-otp", authLimiter);
+  app.use("/api/auth/verify-totp", authLimiter);
   app.use("/api/enquiries", publicFormLimiter);
   app.use("/api/partnerships", publicFormLimiter);
 
@@ -118,7 +117,7 @@ export async function mountApiRoutes(app: Express): Promise<void> {
       mode: "postgresql (Neon / Prisma)",
       storage: storageMode(),
       docs: {
-        auth: "POST /api/auth/login | /register | /verify-otp",
+        auth: "POST /api/auth/login | /register | /verify-totp",
         files: "GET /api/files/:kind/:filename (Bearer or ?token=)",
         applications: "/api/applications",
         clarifications: "/api/clarifications",
