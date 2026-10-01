@@ -14,7 +14,8 @@ healthRouter.get("/", async (_req, res) => {
   }
 
   const ok = database === "up";
-  res.status(ok ? 200 : 503).json({
+  // Always 200 so Railway keeps the process up; clients check `ok` / `database`.
+  res.status(200).json({
     ok,
     service: "mysuru-msme-awards-backend",
     database,
