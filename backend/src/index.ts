@@ -1,20 +1,23 @@
 import "dotenv/config";
+import { createApp, mountApiRoutes } from "./app";
 
 const port = Number(process.env.PORT || 4000);
 
 async function main() {
-  // Import app only — no Prisma — so we bind the port immediately for Railway.
-  const { createApp } = await import("./app");
-  const app = createApp();
+  console.log("[boot] PORT=", port, "NODE_ENV=", process.env.NODE_ENV);
 
+  // 1) Bind immediately with health-only app (no Prisma).
+  const app = createApp();
   await new Promise<void>((resolve, reject) => {
     const server = app.listen(port, "0.0.0.0", () => {
       console.log(`Mysuru MSME Awards API listening on 0.0.0.0:${port}`);
       console.log(`Health: http://0.0.0.0:${port}/api/health`);
       resolve();
     });
-    server.on("error", reject);
-
+    server.on("error", (err) => {
+      console.error("[server] listen error:", err);
+      reject(err);
+    });
     process.on("SIGTERM", () => {
       console.log("[server] SIGTERM");
       server.close(() => process.exit(0));
@@ -22,15 +25,18 @@ async function main() {
   });
 
   setInterval(() => {}, 60_000);
+  process.on("uncaughtException", (err) => console.error("[server] uncaughtException:", err));
+  process.on("unhandledRejection", (err) => console.error("[server] unhandledRejection:", err));
 
-  process.on("uncaughtException", (err) => {
-    console.error("[server] uncaughtException:", err);
-  });
-  process.on("unhandledRejection", (err) => {
-    console.error("[server] unhandledRejection:", err);
-  });
+  // 2) Mount full API (Prisma, routes) after port is open.
+  try {
+    await mountApiRoutes(app);
+    console.log("[boot] API routes mounted");
+  } catch (err) {
+    console.error("[boot] failed to mount API routes:", err);
+  }
 
-  // DB warm-up + admin bootstrap after port is open
+  // 3) Warm DB + bootstrap admin (non-blocking for health).
   try {
     const { prisma } = await import("./lib/prisma");
     const { bootstrapAdminFromEnv } = await import("./lib/bootstrapAdmin");

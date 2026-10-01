@@ -8,7 +8,11 @@ const helpDir = path.join(uploadRoot, "help");
 const docsDir = path.join(uploadRoot, "documents");
 
 for (const dir of [uploadRoot, juryDir, helpDir, docsDir]) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  try {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    console.warn("[upload] could not create", dir, err);
+  }
 }
 
 const storage = multer.diskStorage({

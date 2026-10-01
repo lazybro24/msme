@@ -1,25 +1,10 @@
-import express from "express";
+import express, { type Express } from "express";
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { healthRouter } from "./routes/health";
-import { enquiriesRouter } from "./routes/enquiries";
-import { partnershipsRouter } from "./routes/partnerships";
-import { applicationsRouter } from "./routes/applications";
-import { authRouter } from "./routes/auth";
-import { clarificationsRouter } from "./routes/clarifications";
-import { evaluationsRouter } from "./routes/evaluations";
-import { adminRouter } from "./routes/admin";
-import { adminControlRouter } from "./routes/adminControl";
-import { miscRouter } from "./routes/misc";
-import { documentsRouter } from "./routes/documents";
-import { publicContentRouter } from "./routes/publicContent";
-import { filesRouter } from "./routes/files";
-import { storageMode } from "./lib/storage";
 
-export function createApp() {
-  const app = express();
-  // Comma-separated list supported, e.g. https://msme.toyacorp.in,https://mysuru-msme-awards.vercel.app
+function applyBaseMiddleware(app: Express) {
   const raw = process.env.CORS_ORIGIN || "http://localhost:3000";
   const origins = raw.split(",").map((s) => s.trim()).filter(Boolean);
 
@@ -37,6 +22,59 @@ export function createApp() {
     }),
   );
   app.use(express.json({ limit: "2mb" }));
+}
+
+/**
+ * Minimal app: health + root only. No Prisma / routes that can crash boot.
+ * Railway must be able to hit /api/health as soon as the process starts.
+ */
+export function createApp(): Express {
+  const app = express();
+  applyBaseMiddleware(app);
+
+  app.use("/api/health", healthRouter);
+  app.get("/", (_req, res) => {
+    res.json({
+      name: "Mysuru MSME Awards 2026 API",
+      status: "booting",
+      health: "/api/health",
+    });
+  });
+
+  return app;
+}
+
+/** Mount full API after listen — imports Prisma-heavy routers here. */
+export async function mountApiRoutes(app: Express): Promise<void> {
+  const [
+    { enquiriesRouter },
+    { partnershipsRouter },
+    { applicationsRouter },
+    { authRouter },
+    { clarificationsRouter },
+    { evaluationsRouter },
+    { adminRouter },
+    { adminControlRouter },
+    { miscRouter },
+    { documentsRouter },
+    { publicContentRouter },
+    { filesRouter },
+    { storageMode },
+  ] = await Promise.all([
+    import("./routes/enquiries"),
+    import("./routes/partnerships"),
+    import("./routes/applications"),
+    import("./routes/auth"),
+    import("./routes/clarifications"),
+    import("./routes/evaluations"),
+    import("./routes/admin"),
+    import("./routes/adminControl"),
+    import("./routes/misc"),
+    import("./routes/documents"),
+    import("./routes/publicContent"),
+    import("./routes/files"),
+    import("./lib/storage"),
+  ]);
 
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -62,7 +100,6 @@ export function createApp() {
   app.use("/api/enquiries", publicFormLimiter);
   app.use("/api/partnerships", publicFormLimiter);
 
-  app.use("/api/health", healthRouter);
   app.use("/api/auth", authRouter);
   app.use("/api/applications", applicationsRouter);
   app.use("/api/clarifications", clarificationsRouter);
@@ -76,6 +113,7 @@ export function createApp() {
   app.use("/api/partnerships", partnershipsRouter);
   app.use("/api", miscRouter);
 
+  // Replace boot root with full info
   app.get("/", (_req, res) => {
     res.json({
       name: "Mysuru MSME Awards 2026 API",
@@ -91,6 +129,4 @@ export function createApp() {
       },
     });
   });
-
-  return app;
 }

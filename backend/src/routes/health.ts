@@ -1,14 +1,12 @@
 import { Router } from "express";
-import { storageMode } from "../lib/storage";
 
 export const healthRouter = Router();
 
-/** Liveness only — never touches DB (avoids Railway 502 when Neon is slow). */
+/** Liveness only — zero deps beyond Express (Railway healthcheck). */
 healthRouter.get("/", (_req, res) => {
   res.status(200).json({
     ok: true,
     service: "mysuru-msme-awards-backend",
-    storage: storageMode(),
     time: new Date().toISOString(),
   });
 });
