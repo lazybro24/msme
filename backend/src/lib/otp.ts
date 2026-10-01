@@ -37,9 +37,12 @@ export async function issueEmailOtp(input: {
   const expose = !mail.sent && allowDevMailCodes();
 
   if (!mail.sent && smtpConfigured() && !expose) {
+    const hint = /ENETUNREACH|ETIMEDOUT|timed out|ECONNREFUSED/i.test(mail.error || "")
+      ? " Email server unreachable from hosting (check SMTP / IPv4). Try again shortly."
+      : "";
     return {
       ok: false as const,
-      error: mail.error || "Failed to send verification email. Check SMTP settings.",
+      error: (mail.error || "Failed to send verification email.") + hint,
     };
   }
 

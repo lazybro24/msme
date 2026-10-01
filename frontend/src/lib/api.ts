@@ -3,6 +3,7 @@ export const API_URL =
 
 const TOKEN_KEY = "msme_token";
 const USER_KEY = "msme_user";
+const DEFAULT_TIMEOUT_MS = 20_000;
 
 export type AuthUser = {
   id: string;
@@ -54,7 +55,7 @@ export function clearSession() {
 
 export async function api<T>(
   path: string,
-  options: RequestInit & { auth?: boolean } = {},
+  options: RequestInit & { auth?: boolean; timeoutMs?: number } = {},
 ): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -64,7 +65,27 @@ export async function api<T>(
     const token = getToken();
     if (token) headers.Authorization = `Bearer ${token}`;
   }
-  const res = await fetch(`${API_URL}${path}`, { ...options, headers });
+
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("Request timed out. Please try again.");
+    }
+    throw err instanceof Error ? err : new Error("Network error");
+  } finally {
+    clearTimeout(timer);
+  }
+
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const err = (data as { error?: unknown }).error;

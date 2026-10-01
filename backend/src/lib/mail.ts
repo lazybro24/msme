@@ -1,5 +1,13 @@
 import crypto from "crypto";
+import dns from "dns";
 import nodemailer from "nodemailer";
+
+// Railway / many hosts fail Gmail over IPv6 (ENETUNREACH :587). Prefer IPv4.
+try {
+  dns.setDefaultResultOrder("ipv4first");
+} catch {
+  /* Node < 17 */
+}
 
 type SendMailInput = {
   to: string;
@@ -8,13 +16,14 @@ type SendMailInput = {
   html?: string;
 };
 
+const SMTP_TIMEOUT_MS = Number(process.env.SMTP_TIMEOUT_MS || 8000);
+
 export function smtpConfigured() {
   const host = process.env.SMTP_HOST?.trim() || "";
   const user = process.env.SMTP_USER?.trim() || "";
   const pass = process.env.SMTP_PASS?.trim() || "";
   const from = process.env.SMTP_FROM?.trim() || "";
   if (!host || !user || !pass || !from) return false;
-  // Ignore common placeholders so registration isn't blocked
   const placeholders = ["your@gmail.com", "your-app-password", "changeme", "example.com"];
   if (placeholders.some((p) => user.includes(p) || pass.includes(p) || from.includes(p))) {
     return false;
@@ -40,7 +49,30 @@ function transporter() {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
     },
-  });
+    // Fail fast — do not hang register/login for minutes on bad network
+    connectionTimeout: SMTP_TIMEOUT_MS,
+    greetingTimeout: SMTP_TIMEOUT_MS,
+    socketTimeout: SMTP_TIMEOUT_MS,
+    // Force IPv4 where supported by the underlying socket
+    family: 4,
+  } as nodemailer.TransportOptions);
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${label} timed out after ${ms}ms`)),
+          ms,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export async function sendMail(
@@ -52,13 +84,20 @@ export async function sendMail(
   }
 
   try {
-    await transporter().sendMail({
-      from: process.env.SMTP_FROM,
-      to: input.to,
-      subject: input.subject,
-      text: input.text,
-      html: input.html ?? `<p style="font-family:Arial,sans-serif;line-height:1.5">${input.text.replace(/\n/g, "<br/>")}</p>`,
-    });
+    const tx = transporter();
+    await withTimeout(
+      tx.sendMail({
+        from: process.env.SMTP_FROM,
+        to: input.to,
+        subject: input.subject,
+        text: input.text,
+        html:
+          input.html ??
+          `<p style="font-family:Arial,sans-serif;line-height:1.5">${input.text.replace(/\n/g, "<br/>")}</p>`,
+      }),
+      SMTP_TIMEOUT_MS + 2000,
+      "SMTP send",
+    );
     return { sent: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : "SMTP send failed";
@@ -110,7 +149,7 @@ export async function sendOtpMail(to: string, code: string, purpose: string) {
 }
 
 export async function sendWelcomeMail(to: string, fullName: string, orgName?: string | null) {
-  const origin = process.env.CORS_ORIGIN || "http://localhost:3000";
+  const origin = (process.env.CORS_ORIGIN || "http://localhost:3000").split(",")[0]!.trim();
   const text = `Hi ${fullName},\n\nYour nomination account${orgName ? ` for ${orgName}` : ""} is ready.\nSign in: ${origin}/nominate/login\n\n— Mysuru MSME Awards Secretariat`;
   return sendMail({
     to,
