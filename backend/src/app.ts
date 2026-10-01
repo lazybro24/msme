@@ -19,7 +19,9 @@ import { storageMode } from "./lib/storage";
 
 export function createApp() {
   const app = express();
-  const origin = process.env.CORS_ORIGIN || "http://localhost:3000";
+  // Comma-separated list supported, e.g. https://msme.toyacorp.in,https://mysuru-msme-awards.vercel.app
+  const raw = process.env.CORS_ORIGIN || "http://localhost:3000";
+  const origins = raw.split(",").map((s) => s.trim()).filter(Boolean);
 
   app.set("trust proxy", 1);
   app.use(
@@ -30,7 +32,7 @@ export function createApp() {
   );
   app.use(
     cors({
-      origin,
+      origin: origins.length === 1 ? origins[0] : origins,
       credentials: true,
     }),
   );
