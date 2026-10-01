@@ -1,10 +1,10 @@
 [build]
-builder = "NIXPACKS"
-# Nixpacks already runs `npm ci` in install — do NOT run it again (EBUSY on node_modules).
-buildCommand = "sh -c 'export DATABASE_URL=\"${DATABASE_URL:-postgresql://build:build@127.0.0.1:5432/build}\" && npx prisma generate && npx tsc'"
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
 
 [deploy]
 startCommand = "node scripts/start-prod.js"
+# Internal probe; keep short path with no DB
 healthcheckPath = "/api/health"
-healthcheckTimeout = 60
+healthcheckTimeout = 100
 restartPolicyType = "ON_FAILURE"
