@@ -17,6 +17,7 @@ import { authFileUrl } from "@/lib/files";
 import { cn } from "@/lib/utils";
 import { NominationProgressProvider, useSharedNominationProgress } from "@/hooks/NominationProgressContext";
 import { UnsavedProcessProvider, useUnsavedProcessOptional } from "@/hooks/UnsavedProcessContext";
+import { useConfirm } from "@/components/portal/ConfirmDialog";
 import { ADMIN_BASE, adminHref } from "@/lib/adminPath";
 import { PasswordField } from "@/components/ui/PasswordField";
 
@@ -337,8 +338,16 @@ function PortalShellBody({
           : "/nominate/login";
 
   const unsaved = useUnsavedProcessOptional();
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
-  function handleLogout() {
+  async function handleLogout() {
+    const ok = await confirm({
+      title: "Log out?",
+      message: "You will need to sign in again to continue.",
+      confirmLabel: "Yes, log out",
+      cancelLabel: "Stay signed in",
+    });
+    if (!ok) return;
     if (unsaved?.requestLeave("__logout__")) return;
     clearSession();
     router.push(loginPath);
@@ -408,7 +417,8 @@ function PortalShellBody({
 
   async function changePassword(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const fd = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const fd = new FormData(form);
     const currentPassword = String(fd.get("currentPassword") || "");
     const newPassword = String(fd.get("newPassword") || "");
     const confirmPassword = String(fd.get("confirmPassword") || "");
@@ -425,9 +435,9 @@ function PortalShellBody({
     setPwBusy(true);
     try {
       await apiPost("/api/auth/change-password", { currentPassword, newPassword });
-      setPwMsg("Password updated.");
-      e.currentTarget.reset();
+      form.reset();
       setShowPwForm(false);
+      setPwMsg("Password updated.");
     } catch (err) {
       setPwError(err instanceof Error ? err.message : "Could not update password");
     } finally {
@@ -438,7 +448,7 @@ function PortalShellBody({
   const logoutBtn = (
     <button
       type="button"
-      onClick={handleLogout}
+      onClick={() => void handleLogout()}
       className={cn(
         "inline-flex h-full min-h-[4.5rem] min-w-[5.25rem] flex-col items-center justify-center gap-1.5 self-stretch border px-3 text-[10px] font-bold uppercase tracking-[0.1em] transition",
         t.menuBtn,
@@ -629,7 +639,7 @@ function PortalShellBody({
                 <Link
                   href="/jury-portal/profile"
                   className={cn(
-                    "flex min-h-10 w-full items-center px-2.5 py-2 text-left text-[10px] font-bold uppercase leading-snug tracking-[0.08em] transition hover:opacity-90",
+                    "flex min-h-10 w-full items-center justify-center px-2.5 py-2 text-center text-[10px] font-bold uppercase leading-snug tracking-[0.08em] transition hover:opacity-90",
                     t.userChip,
                   )}
                   title="My Profile"
@@ -640,7 +650,7 @@ function PortalShellBody({
                 <button
                   type="button"
                   className={cn(
-                    "flex min-h-10 w-full items-center px-2.5 py-2 text-left text-[10px] font-bold uppercase leading-snug tracking-[0.08em] transition hover:opacity-90",
+                    "flex min-h-10 w-full items-center justify-center px-2.5 py-2 text-center text-[10px] font-bold uppercase leading-snug tracking-[0.08em] transition hover:opacity-90",
                     t.userChip,
                     profileOpen && "ring-1 ring-[var(--brand-gold)]",
                   )}
@@ -655,7 +665,7 @@ function PortalShellBody({
               {variant === "jury" ? (
                 <button
                   type="button"
-                  onClick={handleLogout}
+                  onClick={() => void handleLogout()}
                   className={cn(
                     "inline-flex min-h-9 w-full items-center justify-center gap-1.5 border px-2.5 text-[10px] font-bold uppercase tracking-[0.1em] transition",
                     t.menuBtn,
@@ -733,7 +743,7 @@ function PortalShellBody({
                   </Link>
                   <button
                     type="button"
-                    onClick={handleLogout}
+                    onClick={() => void handleLogout()}
                     className={cn(
                       "inline-flex h-10 items-center justify-center gap-1.5 border px-2.5 text-[10px] font-bold uppercase tracking-[0.1em]",
                       t.menuBtn,
@@ -826,7 +836,7 @@ function PortalShellBody({
                       type="button"
                       onClick={() => {
                         setOpen(false);
-                        handleLogout();
+                        void handleLogout();
                       }}
                       className={cn(
                         "mt-2 flex w-full items-center justify-center gap-2 border px-3 py-3 text-sm font-bold uppercase tracking-[0.08em]",
@@ -916,7 +926,7 @@ function PortalShellBody({
                   )}
                   <button
                     type="button"
-                    onClick={handleLogout}
+                    onClick={() => void handleLogout()}
                     className={cn(
                       "inline-flex h-10 items-center justify-center gap-1.5 border px-2.5 text-[10px] font-bold uppercase tracking-[0.1em]",
                       t.menuBtn,
@@ -1013,7 +1023,7 @@ function PortalShellBody({
                 type="button"
                 onClick={() => {
                   setOpen(false);
-                  handleLogout();
+                  void handleLogout();
                 }}
                 className={cn(
                   "mt-4 flex w-full items-center justify-center gap-2 border px-3 py-3 text-sm font-bold uppercase tracking-[0.08em]",
@@ -1029,6 +1039,7 @@ function PortalShellBody({
       )}
 
       <main className="relative z-[1] mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">{children}</main>
+      {confirmDialog}
     </div>
   );
 }

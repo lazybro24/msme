@@ -48,7 +48,7 @@ function flattenFields(
 ): { label: string; value: string }[] {
   const out: { label: string; value: string }[] = [];
   for (const [k, v] of Object.entries(obj)) {
-    if (k === "step" || k === "savedAt") continue;
+    if (k === "step" || k === "savedAt" || k === "answers") continue;
     const label = prefix ? `${prefix} · ${k}` : k;
     if (v == null || v === "") continue;
     if (typeof v === "object" && !Array.isArray(v)) {
@@ -60,6 +60,154 @@ function flattenFields(
     }
   }
   return out;
+}
+
+/** Flat applicant form answers live under draftJson.answers */
+function flatAnswers(draft: Record<string, unknown>): Record<string, string> {
+  const nested = asRecord(draft.answers);
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(nested)) {
+    if (v == null) continue;
+    const s = String(v).trim();
+    if (s) out[k] = s;
+  }
+  return out;
+}
+
+function fieldsFromKeys(
+  answers: Record<string, string>,
+  pairs: [string, string][],
+): { label: string; value: string }[] {
+  const out: { label: string; value: string }[] = [];
+  for (const [key, label] of pairs) {
+    const v = answers[key];
+    if (v) out.push({ label, value: v });
+  }
+  return out;
+}
+
+/** Build jury dossier sections from flat answers (+ legacy nested draft shape). */
+function buildDossierFromDraft(
+  draft: Record<string, unknown>,
+  categoryCriteriaNames: string[] = [],
+): {
+  overview: { label: string; value: string }[];
+  performance: { label: string; value: string }[];
+  category: { label: string; value: string }[];
+  mysuru: { label: string; value: string }[];
+  signature: { label: string; value: string }[];
+  eligibility: { label: string; value: string }[];
+  declaration: { label: string; value: string }[];
+} {
+  const answers = flatAnswers(draft);
+  const overviewNested = flattenFields(asRecord(draft.overview));
+  const performanceNested = flattenFields(asRecord(draft.performance));
+  const categoryNested = flattenFields(asRecord(draft.category));
+  const mysuruNested = flattenFields(asRecord(draft.mysuru));
+  const signatureNested = flattenFields(asRecord(draft.signature));
+
+  const eligibility: { label: string; value: string }[] = [];
+  for (let i = 0; i < 4; i++) {
+    const v = answers[`eligibility_${i}`];
+    if (!v) continue;
+    eligibility.push({ label: `Eligibility ${i + 1}`, value: v });
+    const reason = answers[`eligibility_${i}_reason`];
+    if (reason) eligibility.push({ label: `Eligibility ${i + 1} reason`, value: reason });
+  }
+
+  const overview =
+    overviewNested.length > 0
+      ? overviewNested
+      : fieldsFromKeys(answers, [
+          ["overview_describe", "Describe your business"],
+          ["overview_products", "Principal products or services"],
+          ["overview_customers", "Principal customers or markets"],
+          ["overview_differentiates", "What differentiates your organisation?"],
+          ["overview_achievements", "Three most important achievements"],
+        ]);
+
+  const performance =
+    performanceNested.length > 0
+      ? performanceNested
+      : (() => {
+          const rows: { label: string; value: string }[] = [];
+          const metrics = [
+            "Revenue (₹)",
+            "Profit / EBITDA (₹)",
+            "Employees",
+            "Customers / Clients",
+            "Locations / Markets",
+          ];
+          for (let mi = 0; mi < metrics.length; mi++) {
+            for (let yi = 0; yi < 3; yi++) {
+              const key = `perf_m${mi}_y${yi}`;
+              if (answers[key]) rows.push({ label: `${metrics[mi]} · FY-${3 - yi}`, value: answers[key] });
+            }
+          }
+          rows.push(
+            ...fieldsFromKeys(answers, [
+              ["perf_investment", "Major investment"],
+              ["perf_markets", "New markets entered"],
+              ["perf_capacity", "Capacity expansion"],
+              ["perf_products", "New products / services"],
+              ["perf_export", "Export contribution"],
+            ]),
+          );
+          return rows;
+        })();
+
+  const category =
+    categoryNested.length > 0
+      ? categoryNested
+      : (() => {
+          const rows: { label: string; value: string }[] = [];
+          for (let i = 0; i < 12; i++) {
+            const v = answers[`category_q_${i}`];
+            if (!v) continue;
+            rows.push({
+              label: categoryCriteriaNames[i] || `Category question ${i + 1}`,
+              value: v,
+            });
+          }
+          return rows;
+        })();
+
+  const mysuru =
+    mysuruNested.length > 0
+      ? mysuruNested
+      : fieldsFromKeys(answers, [
+          ["mysuru_contribution", "Contribution to Mysuru"],
+          ["mysuru_employees", "Employees based in Mysuru"],
+          ["mysuru_vendors", "Local vendors / suppliers"],
+          ["mysuru_sourcing", "Local sourcing"],
+          ["mysuru_employment", "Local employment initiatives"],
+          ["mysuru_community", "Community contribution"],
+          ["mysuru_ecosystem", "Mysuru business ecosystem"],
+        ]);
+  if (!mysuru.length && draft.mysuruContribution) {
+    mysuru.push({ label: "Contribution", value: String(draft.mysuruContribution) });
+  }
+
+  const signature =
+    signatureNested.length > 0
+      ? signatureNested
+      : fieldsFromKeys(answers, [
+          ["signature_achievement", "Achievement"],
+          ["signature_why", "Why it matters"],
+        ]);
+  if (!signature.length && draft.signatureAchievement) {
+    signature.push({ label: "Achievement", value: String(draft.signatureAchievement) });
+  }
+
+  const declaration = fieldsFromKeys(answers, [
+    ["decl_signatory", "Authorized Signatory"],
+    ["decl_designation", "Designation"],
+    ["decl_place", "Place"],
+    ["decl_date", "Date & time"],
+    ["decl_agree", "Declaration agreement"],
+  ]);
+
+  return { overview, performance, category, mysuru, signature, eligibility, declaration };
 }
 
 async function aggregateScores(applicationCuid: string) {
@@ -225,11 +373,87 @@ evaluationsRouter.get(
       orderBy: { createdAt: "desc" },
     });
 
-    const overview = asRecord(draft.overview);
-    const signature = asRecord(draft.signature);
-    const performance = asRecord(draft.performance);
-    const category = asRecord(draft.category);
-    const mysuru = asRecord(draft.mysuru);
+    // Criteria labels for category_q_* (frontend awards content mirrored lightly)
+    const criteriaByCode: Record<string, string[]> = {
+      MFG: [
+        "Manufacturing Performance & Productivity",
+        "Quality Management",
+        "Process Innovation & Automation",
+        "Operational Efficiency",
+        "Safety & Compliance",
+        "Sustainable Manufacturing",
+        "Workforce Development",
+        "Growth & Market Performance",
+      ],
+      SRV: [
+        "Service Delivery Excellence",
+        "Customer Experience & Satisfaction",
+        "Operational Reliability",
+        "Process & Digital Enablement",
+        "People Capability",
+        "Growth & Market Reach",
+        "Compliance & Governance",
+      ],
+      EMG: [
+        "Traction & Growth Momentum",
+        "Differentiation & Value Proposition",
+        "Scalability & Operating Model",
+        "Innovation / Technology Adoption",
+        "Team & Leadership",
+        "Market Opportunity",
+        "Governance Basics",
+      ],
+      INN: [
+        "Innovation Impact",
+        "Technology Adoption / Build",
+        "Business Value Created",
+        "Scalability of Innovation",
+        "Capability & Talent",
+        "Risk, Security & Governance",
+      ],
+      GRW: [
+        "Revenue & Profitability Growth",
+        "Market Expansion",
+        "Employment & Capability Growth",
+        "Investment & Capacity Building",
+        "Sustainability of Growth",
+        "Governance & Risk Discipline",
+      ],
+      WEN: [
+        "Entrepreneurial Leadership",
+        "Business Performance",
+        "Innovation / Differentiation",
+        "People & Ecosystem Impact",
+        "Resilience & Governance",
+        "Contribution to Mysuru",
+      ],
+      YEN: [
+        "Entrepreneurial Achievement",
+        "Business Traction",
+        "Innovation & Ambition",
+        "Leadership Maturity",
+        "Scalability Potential",
+        "Mysuru Contribution",
+      ],
+      SSI: [
+        "Impact Clarity & Measurement",
+        "Environmental / Social Outcomes",
+        "Integration with Business Model",
+        "Stakeholder Engagement",
+        "Governance & Transparency",
+        "Scalability / Continuity",
+      ],
+      EMP: [
+        "Workplace Culture",
+        "Learning & Development",
+        "Employee Wellbeing & Safety",
+        "Inclusion & Fair Practices",
+        "Retention & Engagement",
+        "People Governance",
+      ],
+    };
+
+    const mapped = buildDossierFromDraft(draft, criteriaByCode[app.categoryCode] || []);
 
     const dossierSections = [
       {
@@ -254,44 +478,46 @@ evaluationsRouter.get(
           : [],
       },
       {
+        key: "eligibility",
+        label: "Eligibility",
+        ready: mapped.eligibility.length > 0,
+        fields: mapped.eligibility,
+      },
+      {
         key: "signature",
         label: "Signature Achievement",
-        ready: flattenFields(signature).length > 0 || Boolean(draft.signatureAchievement),
-        fields:
-          flattenFields(signature).length > 0
-            ? flattenFields(signature)
-            : draft.signatureAchievement
-              ? [{ label: "Achievement", value: String(draft.signatureAchievement) }]
-              : [],
+        ready: mapped.signature.length > 0,
+        fields: mapped.signature,
       },
       {
         key: "overview",
         label: "Business Overview",
-        ready: flattenFields(overview).length > 0,
-        fields: flattenFields(overview),
+        ready: mapped.overview.length > 0,
+        fields: mapped.overview,
       },
       {
         key: "performance",
         label: "Performance Data",
-        ready: flattenFields(performance).length > 0,
-        fields: flattenFields(performance),
+        ready: mapped.performance.length > 0,
+        fields: mapped.performance,
       },
       {
         key: "category",
         label: "Category Responses",
-        ready: flattenFields(category).length > 0,
-        fields: flattenFields(category),
+        ready: mapped.category.length > 0,
+        fields: mapped.category,
       },
       {
         key: "mysuru",
         label: "Mysuru Contribution",
-        ready: flattenFields(mysuru).length > 0 || Boolean(draft.mysuruContribution),
-        fields:
-          flattenFields(mysuru).length > 0
-            ? flattenFields(mysuru)
-            : draft.mysuruContribution
-              ? [{ label: "Contribution", value: String(draft.mysuruContribution) }]
-              : [],
+        ready: mapped.mysuru.length > 0,
+        fields: mapped.mysuru,
+      },
+      {
+        key: "declaration",
+        label: "Declaration",
+        ready: mapped.declaration.length > 0,
+        fields: mapped.declaration,
       },
       {
         key: "evidence",
@@ -309,7 +535,7 @@ evaluationsRouter.get(
       {
         key: "verification",
         label: "Verification Notes",
-        ready: app.adminDecision === "ACCEPTED",
+        ready: app.adminDecision === "ACCEPTED" || app.adminDecision === "REJECTED",
         fields: [
           { label: "Decision", value: app.adminDecision || "—" },
           { label: "Verified by", value: app.verifiedBy || "—" },
@@ -319,7 +545,9 @@ evaluationsRouter.get(
           },
           ...(app.rejectionReason
             ? [{ label: "Notes", value: app.rejectionReason }]
-            : [{ label: "Notes", value: "Accepted for jury evaluation" }]),
+            : app.adminDecision === "ACCEPTED"
+              ? [{ label: "Notes", value: "Accepted for jury evaluation" }]
+              : [{ label: "Notes", value: "Pending admin decision" }]),
         ],
       },
     ];

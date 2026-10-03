@@ -21,6 +21,55 @@ function pickSharedAnswers(answers: Record<string, unknown>) {
   );
 }
 
+function answerFilled(answers: Record<string, unknown>, key: string) {
+  return String(answers[key] ?? "").trim().length > 0;
+}
+
+/**
+ * Rough progress mirror of the frontend nomination completeness helper.
+ * Common/shared ≈ 45%; category scorecard ≈ 25%; trailing wrap-up ≈ 30%.
+ */
+function computeDraftProgress(
+  answers: Record<string, unknown>,
+  step: number,
+  categoryQuestionCount = 6,
+): number {
+  let common = 0;
+  let eligDone = 0;
+  for (let i = 0; i < 4; i++) {
+    const v = String(answers[`eligibility_${i}`] ?? "").trim().toLowerCase();
+    if (v === "yes" || (v === "no" && answerFilled(answers, `eligibility_${i}_reason`))) {
+      eligDone += 1;
+    }
+  }
+  common += (eligDone / 4) * 12;
+  if (answerFilled(answers, "overview_describe")) common += 16;
+  if (answerFilled(answers, "perf_m0_y2")) common += 17;
+  common = Math.min(45, common);
+
+  const n = Math.max(1, categoryQuestionCount);
+  let catDone = 0;
+  for (let i = 0; i < n; i++) {
+    if (answerFilled(answers, `category_q_${i}`)) catDone += 1;
+  }
+  const scorecard = (catDone / n) * 25;
+
+  let trailing = 0;
+  if (answerFilled(answers, "mysuru_contribution")) trailing += 8;
+  if (answerFilled(answers, "signature_achievement")) trailing += 8;
+  if (
+    answerFilled(answers, "decl_signatory") &&
+    String(answers.decl_agree ?? "").trim().toLowerCase() === "yes"
+  ) {
+    trailing += 10;
+  }
+  if (step >= 8) trailing += 2;
+  if (step >= 10) trailing += 2;
+  trailing = Math.min(30, trailing);
+
+  return Math.min(100, Math.round(common + scorecard + trailing));
+}
+
 async function siblingSharedDraftSeed(applicantId: string): Promise<Prisma.InputJsonValue | null> {
   const siblings = await prisma.application.findMany({
     where: { applicantId, status: "DRAFT" },
@@ -84,18 +133,20 @@ async function syncSharedAnswersToDraftSiblings(
     const categoryOnly = Object.fromEntries(
       Object.entries(prev.answers || {}).filter(([k]) => k.startsWith("category_q_")),
     );
+    const nextAnswers = { ...sharedAnswers, ...categoryOnly };
     const nextStep =
       typeof prev.step === "number" && prev.step >= 5
         ? prev.step
         : Math.max(5, typeof draft.step === "number" ? Math.min(draft.step, 5) : 5);
+    const nextProgress = computeDraftProgress(nextAnswers, nextStep);
     await prisma.application.update({
       where: { id: sib.id },
       data: {
-        progress: Math.max(sib.progress, 45),
+        progress: Math.max(sib.progress, nextProgress),
         draftJson: {
           ...prev,
           step: nextStep,
-          answers: { ...sharedAnswers, ...categoryOnly } as Prisma.InputJsonValue,
+          answers: nextAnswers as Prisma.InputJsonValue,
           documents: (draft.documents ?? prev.documents ?? null) as Prisma.InputJsonValue,
           savedAt: draft.savedAt ?? prev.savedAt ?? new Date().toISOString(),
         } as Prisma.InputJsonValue,
@@ -114,41 +165,61 @@ async function hydrateDraftFromSiblings(app: {
 }) {
   if (app.status !== "DRAFT") return app;
   const draft = parseDraft(app.draftJson);
-  const answers = draft.answers || {};
-  const hasShared =
-    String(answers.overview_describe ?? "").trim().length > 0 ||
-    String(answers.decl_signatory ?? "").trim().length > 0;
-  if (hasShared) return app;
+  const answers = { ...(draft.answers || {}) };
 
   const siblings = await prisma.application.findMany({
     where: { applicantId: app.applicantId, NOT: { id: app.id } },
     orderBy: { updatedAt: "desc" },
   });
 
+  let mergedShared: Record<string, unknown> = {};
+  let docsFromSibling: unknown = draft.documents ?? null;
   for (const sib of siblings) {
     const sibDraft = parseDraft(sib.draftJson);
     const shared = pickSharedAnswers(sibDraft.answers || {});
-    if (Object.keys(shared).length < 2) continue;
-    const categoryOnly = Object.fromEntries(
-      Object.entries(answers).filter(([k]) => k.startsWith("category_q_")),
-    );
-    const updated = await prisma.application.update({
-      where: { id: app.id },
-      data: {
-        progress: Math.max(app.progress, 45),
-        draftJson: {
-          ...draft,
-          step: 5,
-          answers: { ...shared, ...categoryOnly } as Prisma.InputJsonValue,
-          documents: (sibDraft.documents ?? draft.documents ?? null) as Prisma.InputJsonValue,
-          savedAt: new Date().toISOString(),
-          hydratedFromSibling: true,
-        } as Prisma.InputJsonValue,
-      },
-    });
-    return updated;
+    if (!Object.keys(shared).length) continue;
+    // Fill only keys this draft is still missing — never overwrite local answers
+    for (const [k, v] of Object.entries(shared)) {
+      const cur = String(answers[k] ?? "").trim();
+      const incoming = String(v ?? "").trim();
+      if (!cur && incoming) mergedShared[k] = v;
+    }
+    if (docsFromSibling == null && sibDraft.documents != null) {
+      docsFromSibling = sibDraft.documents;
+    }
   }
-  return app;
+
+  if (!Object.keys(mergedShared).length) return app;
+
+  const categoryOnly = Object.fromEntries(
+    Object.entries(answers).filter(([k]) => k.startsWith("category_q_")),
+  );
+  const existingShared = pickSharedAnswers(answers);
+  const nextAnswers = { ...mergedShared, ...existingShared, ...categoryOnly };
+  const sharedReady =
+    String(nextAnswers.overview_describe ?? "").trim().length > 0 ||
+    String(nextAnswers.decl_signatory ?? "").trim().length > 0;
+  const nextStep =
+    sharedReady && (typeof draft.step !== "number" || draft.step < 5)
+      ? 5
+      : typeof draft.step === "number"
+        ? draft.step
+        : 5;
+  const nextProgress = computeDraftProgress(nextAnswers, nextStep);
+  return prisma.application.update({
+    where: { id: app.id },
+    data: {
+      progress: Math.max(app.progress, nextProgress),
+      draftJson: {
+        ...draft,
+        step: nextStep,
+        answers: nextAnswers as Prisma.InputJsonValue,
+        documents: (docsFromSibling ?? null) as Prisma.InputJsonValue,
+        savedAt: new Date().toISOString(),
+        hydratedFromSibling: true,
+      } as Prisma.InputJsonValue,
+    },
+  });
 }
 
 const STATUSES: ApplicationStatus[] = [
@@ -303,11 +374,10 @@ applicationsRouter.post(
           categoryTitle: cat.categoryTitle,
           status: "DRAFT",
           progress: seedDraft
-            ? Math.max(
-                5,
-                Math.round(
-                  ((((seedDraft as { step?: number }).step || 1) as number) / 10) * 100,
-                ),
+            ? computeDraftProgress(
+                ((seedDraft as { answers?: Record<string, unknown> }).answers ||
+                  {}) as Record<string, unknown>,
+                ((seedDraft as { step?: number }).step || 5) as number,
               )
             : 5,
           applicantId: user.id,
@@ -388,9 +458,10 @@ applicationsRouter.post("/", requireAuth, requireRoles("APPLICANT", "ADMINISTRAT
       categoryTitle: parsed.data.categoryTitle,
       status: "DRAFT",
       progress: seedDraft
-        ? Math.max(
-            5,
-            Math.round(((((seedDraft as { step?: number }).step || 1) as number) / 10) * 100),
+        ? computeDraftProgress(
+            ((seedDraft as { answers?: Record<string, unknown> }).answers ||
+              {}) as Record<string, unknown>,
+            ((seedDraft as { step?: number }).step || 5) as number,
           )
         : 5,
       applicantId: user.id,

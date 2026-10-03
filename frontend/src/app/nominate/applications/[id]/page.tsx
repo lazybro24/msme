@@ -17,12 +17,23 @@ import {
 import { useConfirm } from "@/components/portal/ConfirmDialog";
 import { applicationSteps } from "@/lib/mock/data";
 import { getCategoryBySlug, awardCategories } from "@/content/awards";
+import { CategoryBackdrop } from "@/components/awards/CategoryIcon";
 import { apiGet, apiPatch, apiPost, API_URL, getToken } from "@/lib/api";
 import { useUnsavedProcessGuard } from "@/hooks/UnsavedProcessContext";
 import type { BusinessProfile } from "@/app/nominate/profile/page";
 import {
-  firstIncompleteStep,
+  activeNominationSteps,
+  computeNominationProgress,
+  firstIncompleteActiveStep,
   missingNominationFields,
+  nextActiveStep,
+  prevActiveStep,
+  remainingAfterCommonProgress,
+  reuseMatchingCategoryAnswers,
+  sharedAnswersReady,
+  sharedNominationComplete,
+  stepForMissingField,
+  stepLabelForMissingField,
 } from "@/lib/nominationCompleteness";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ProcessOverlay } from "@/components/ui/ProcessOverlay";
@@ -50,6 +61,7 @@ function WorkspaceInner({
   const router = useRouter();
   const searchParams = useSearchParams();
   const focusScorecard = searchParams.get("focus") === "scorecard";
+  const viewStatus = searchParams.get("view") === "status";
   const code = id.split("-")[1] ?? "MFG";
   const byCode = awardCategories.find((c) => c.code === code);
   const [appMeta, setAppMeta] = useState({
@@ -57,7 +69,15 @@ function WorkspaceInner({
     categorySlug: byCode?.slug ?? "manufacturing-excellence",
     categoryTitle: byCode?.title ?? "Application",
     status: "DRAFT",
+    statusRaw: "DRAFT",
+    adminDecision: "PENDING" as "PENDING" | "ACCEPTED" | "REJECTED",
+    rejectionReason: "" as string | undefined,
+    submittedAt: "" as string | undefined,
+    verifiedAt: "" as string | undefined,
   });
+  const viewAnswers = searchParams.get("view") === "answers";
+  const isDraft = appMeta.statusRaw === "DRAFT";
+  const showStatusView = !isDraft && !viewAnswers && (viewStatus || !focusScorecard);
   const [loading, setLoading] = useState(true);
   const [docsGateChecked, setDocsGateChecked] = useState(false);
   const category = getCategoryBySlug(appMeta.categorySlug) ?? byCode;
@@ -73,28 +93,54 @@ function WorkspaceInner({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [siblingApps, setSiblingApps] = useState<
-    { applicationId: string; categoryTitle: string; status: string }[]
+    {
+      applicationId: string;
+      categoryTitle: string;
+      categorySlug?: string;
+      status: string;
+      draftJson?: { answers?: Answers };
+    }[]
   >([]);
   const stepRootRef = useRef<HTMLDivElement>(null);
   const answersRef = useRef<Answers>({});
   const { confirm, dialog: confirmDialog } = useConfirm();
   const current = applicationSteps[step - 1];
-  const completion = useMemo(
-    () => Math.round((step / applicationSteps.length) * 100),
-    [step],
+  const multiCategory = siblingApps.length > 1;
+  const scorecardOnly = useMemo(
+    () => multiCategory && sharedNominationComplete(answers),
+    [multiCategory, answers],
   );
+  const activeSteps = useMemo(
+    () => activeNominationSteps(answers, multiCategory),
+    [answers, multiCategory],
+  );
+  const completion = useMemo(
+    () => computeNominationProgress(answers, step, scorecard.length),
+    [answers, step, scorecard.length],
+  );
+  const commonDone = useMemo(() => sharedAnswersReady(answers), [answers]);
+  const remainingPath = useMemo(
+    () => remainingAfterCommonProgress(answers, step, scorecard.length),
+    [answers, step, scorecard.length],
+  );
+  const loaderValue = commonDone && (focusScorecard || multiCategory)
+    ? remainingPath
+    : completion;
   const maxReachableStep = useMemo(() => {
-    const firstBad = firstIncompleteStep(answers, scorecard.length);
-    // Allow current incomplete step + completed ones; never jump ahead of first gap.
+    const firstBad = firstIncompleteActiveStep(
+      answers,
+      scorecard.length,
+      multiCategory,
+    );
     return Math.min(applicationSteps.length, Math.max(1, firstBad));
-  }, [answers, scorecard.length]);
+  }, [answers, scorecard.length, multiCategory]);
 
   useEffect(() => {
     answersRef.current = answers;
   }, [answers]);
 
   useUnsavedProcessGuard({
-    dirty: dirty && appMeta.status === "DRAFT",
+    dirty: dirty && isDraft,
     onSave: async () => {
       await saveDraft();
     },
@@ -110,6 +156,10 @@ function WorkspaceInner({
             categorySlug: string;
             categoryTitle: string;
             status: string;
+            adminDecision?: "PENDING" | "ACCEPTED" | "REJECTED";
+            rejectionReason?: string;
+            submittedAt?: string;
+            verifiedAt?: string;
             draftJson?: { step?: number; answers?: Answers };
           };
         }>(`/api/applications/${id}`);
@@ -121,6 +171,11 @@ function WorkspaceInner({
           categorySlug: d.application.categorySlug,
           categoryTitle: d.application.categoryTitle,
           status: statusRaw.replaceAll("_", " "),
+          statusRaw,
+          adminDecision: d.application.adminDecision ?? "PENDING",
+          rejectionReason: d.application.rejectionReason,
+          submittedAt: d.application.submittedAt,
+          verifiedAt: d.application.verifiedAt,
         });
 
         if (statusRaw === "DRAFT") {
@@ -135,14 +190,12 @@ function WorkspaceInner({
         }
 
         const draft = d.application.draftJson;
-        const loadedAnswers =
-          draft?.answers && typeof draft.answers === "object" ? draft.answers : {};
-        setAnswers(loadedAnswers);
+        let loadedAnswers: Answers =
+          draft?.answers && typeof draft.answers === "object" ? { ...draft.answers } : {};
         const cat =
           getCategoryBySlug(d.application.categorySlug) ||
           awardCategories.find((c) => c.slug === d.application.categorySlug);
         const qCount = cat?.criteria?.length ?? scorecard.length;
-        const resume = firstIncompleteStep(loadedAnswers, qCount);
         const draftStep =
           typeof draft?.step === "number" && draft.step >= 1 && draft.step <= applicationSteps.length
             ? draft.step
@@ -151,14 +204,18 @@ function WorkspaceInner({
         let listApps: {
           applicationId: string;
           categoryTitle: string;
+          categorySlug?: string;
           status: string;
+          draftJson?: { answers?: Answers };
         }[] = [];
         try {
           const list = await apiGet<{
             applications: {
               applicationId: string;
               categoryTitle: string;
+              categorySlug?: string;
               status: string;
+              draftJson?: { answers?: Answers };
             }[];
           }>("/api/applications");
           listApps = list.applications || [];
@@ -167,19 +224,43 @@ function WorkspaceInner({
           if (!cancelled) setSiblingApps([]);
         }
 
+        // Reuse identical scorecard questions answered on another category
+        const criteria = cat?.criteria ?? [];
+        for (const sib of listApps) {
+          if (sib.applicationId === d.application.applicationId) continue;
+          const sibCat =
+            getCategoryBySlug(sib.categorySlug || "") ||
+            awardCategories.find((c) => c.slug === sib.categorySlug);
+          const sibAnswers = sib.draftJson?.answers;
+          if (!sibCat?.criteria?.length || !sibAnswers) continue;
+          loadedAnswers = reuseMatchingCategoryAnswers(
+            criteria,
+            loadedAnswers,
+            sibCat.criteria,
+            sibAnswers,
+          ) as Answers;
+        }
+
+        if (!cancelled) setAnswers(loadedAnswers);
+
+        const multi = listApps.length > 1;
+        const resume = firstIncompleteActiveStep(loadedAnswers, qCount, multi);
         const otherSubmitted = listApps.some(
           (a) => a.applicationId !== d.application.applicationId && a.status !== "DRAFT",
         );
-        const sharedReady =
-          String(loadedAnswers.overview_describe || "").trim().length > 0 ||
-          String(loadedAnswers.decl_signatory || "").trim().length > 0;
-        // Multi-category: after shared details exist, land on scorecard (not step 1)
+        const sharedReady = sharedAnswersReady(loadedAnswers);
+        // Multi-category: skip shared steps already answered on another category
         const preferScorecard =
           statusRaw === "DRAFT" &&
-          (focusScorecard || otherSubmitted || (listApps.length > 1 && sharedReady && resume >= 5));
+          (focusScorecard ||
+            otherSubmitted ||
+            (multi && sharedReady) ||
+            (multi && sharedNominationComplete(loadedAnswers)));
 
-        if (preferScorecard) {
-          setStep(Math.min(Math.max(5, resume), applicationSteps.length));
+        if (statusRaw !== "DRAFT") {
+          setStep(applicationSteps.length);
+        } else if (preferScorecard) {
+          setStep(resume);
         } else {
           setStep(Math.min(draftStep, resume));
         }
@@ -291,7 +372,7 @@ function WorkspaceInner({
     try {
       const documents = await fetchDocumentSnapshot();
       await apiPatch(`/api/applications/${id}`, {
-        progress: Math.round((s / applicationSteps.length) * 100),
+        progress: computeNominationProgress(merged, s, scorecard.length),
         draftJson: {
           step: s,
           answers: merged,
@@ -330,7 +411,7 @@ function WorkspaceInner({
   }
 
   function goNext(merged: Answers) {
-    const next = Math.min(applicationSteps.length, step + 1);
+    const next = nextActiveStep(step, merged, multiCategory);
     setStep(next);
     void saveDraft(merged, next);
   }
@@ -344,18 +425,28 @@ function WorkspaceInner({
 
   function tryGoToStep(target: number) {
     if (target === step) return;
+    if (!activeSteps.includes(target)) {
+      setIncompleteBanner(
+        "That section was already answered for this nomination. Only the category scorecard differs.",
+      );
+      setIncompleteOpen(true);
+      return;
+    }
     const partial = collectStepAnswers();
     const merged = mergeAnswers(partial);
 
-    // Always allow going back
+    // Always allow going back within the active path
     if (target < step) {
       setStep(target);
       void saveDraft(merged, target);
       return;
     }
 
-    // Forward: only one step at a time, and current must be complete
-    if (target > step + 1 || target > maxReachableStep) {
+    const path = activeNominationSteps(merged, multiCategory);
+    const curIdx = path.indexOf(step);
+    const tgtIdx = path.indexOf(target);
+    // Forward: only one active step at a time, and current must be complete
+    if (tgtIdx > curIdx + 1 || target > maxReachableStep) {
       setIncompleteBanner(
         "Please complete each section in order. Use Continue after filling required fields.",
       );
@@ -377,6 +468,39 @@ function WorkspaceInner({
     });
     if (!ok) return;
     await saveDraft().catch(() => undefined);
+  }
+
+  if (!loading && docsGateChecked && showStatusView && !isDraft) {
+    return (
+      <PortalShell
+        brand="Nomination"
+        subtitle={`${appMeta.categoryTitle} · Status`}
+        nav={applicantNav}
+        userLabel={appMeta.status}
+      >
+        <ApplicationStatusView
+          appMeta={appMeta}
+          siblingApps={siblingApps}
+          onViewAnswers={() => {
+            setStep(applicationSteps.length);
+            router.replace(`/nominate/applications/${appMeta.id}?view=answers`);
+          }}
+        />
+      </PortalShell>
+    );
+  }
+
+  if (loading || !docsGateChecked) {
+    return (
+      <PortalShell
+        brand="Nomination"
+        subtitle={appMeta.categoryTitle}
+        nav={applicantNav}
+        userLabel={appMeta.status}
+      >
+        <p className="text-sm text-[#666]">Loading nomination…</p>
+      </PortalShell>
+    );
   }
 
   return (
@@ -404,20 +528,37 @@ function WorkspaceInner({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--brand-gold-dark)]">
-              {siblingApps.length > 1 ? "Shared nomination" : "Nomination form"} — {completion}%
+              {!isDraft
+                ? "Submitted nomination · read only"
+                : siblingApps.length > 1
+                  ? "Shared nomination"
+                  : "Nomination form"}{" "}
+              —{" "}
+              {isDraft && commonDone && (focusScorecard || siblingApps.length > 1)
+                ? `${remainingPath}% of scorecard path`
+                : `${completion}%`}
             </p>
             <h1 className="mt-1 font-display text-2xl font-black italic uppercase sm:text-3xl">
-              {step === 5 || focusScorecard
-                ? `Scorecard · ${appMeta.categoryTitle}`
-                : siblingApps.length > 1
-                  ? "Your nomination"
-                  : appMeta.categoryTitle}
+              {!isDraft
+                ? appMeta.categoryTitle
+                : step === 5 || focusScorecard
+                  ? `Scorecard · ${appMeta.categoryTitle}`
+                  : siblingApps.length > 1
+                    ? "Your nomination"
+                    : appMeta.categoryTitle}
             </h1>
             <p className="text-sm text-[#888]">{appMeta.id}</p>
-            {siblingApps.length > 1 && (
+            {multiCategory && isDraft && (
               <p className="mt-2 text-sm text-[#555]">
-                Shared details apply to all categories. Use the tabs below only to answer each
-                category’s scorecard, then submit that category.
+                {scorecardOnly
+                  ? "Shared questions are already filled from your other category — only this category’s scorecard is required."
+                  : "Shared details apply to all categories. Already-answered shared sections are skipped; only remaining required questions are shown."}
+              </p>
+            )}
+            {!isDraft && (
+              <p className="mt-2 text-sm text-[#555]">
+                This nomination is submitted. You can review answers below — editing is locked unless
+                the secretariat reopens it.
               </p>
             )}
             {savedAt && (
@@ -445,8 +586,11 @@ function WorkspaceInner({
                     type="button"
                     disabled={active || saving}
                     onClick={() => {
-                      const href = `/nominate/applications/${sib.applicationId}?focus=scorecard`;
-                      if (dirty && appMeta.status === "DRAFT") {
+                      const href =
+                        sib.status === "DRAFT"
+                          ? `/nominate/applications/${sib.applicationId}?focus=scorecard`
+                          : `/nominate/applications/${sib.applicationId}?view=status`;
+                      if (dirty && isDraft) {
                         void saveDraft()
                           .then(() => router.push(href))
                           .catch(() => router.push(href));
@@ -476,9 +620,10 @@ function WorkspaceInner({
         )}
 
         <div className="mt-4 md:hidden">
-          <ProgressBar value={completion} />
+          <ProgressBar value={loaderValue} />
           <label className="label mt-4">
-            Step {step} of {applicationSteps.length}
+            Step {activeSteps.indexOf(step) + 1 || 1} of {activeSteps.length}
+            {scorecardOnly ? " · Scorecard only" : ""}
           </label>
           <select
             className="input"
@@ -487,46 +632,66 @@ function WorkspaceInner({
               tryGoToStep(Number(e.target.value));
             }}
           >
-            {applicationSteps.map((s) => (
-              <option key={s.id} value={s.id} disabled={s.id > maxReachableStep}>
-                {String(s.id).padStart(2, "0")} — {s.label}
-                {s.id > maxReachableStep ? " (complete earlier steps first)" : ""}
-              </option>
-            ))}
+            {applicationSteps
+              .filter((s) => activeSteps.includes(s.id))
+              .map((s) => (
+                <option key={s.id} value={s.id} disabled={s.id > maxReachableStep}>
+                  {String(s.id).padStart(2, "0")} — {s.label}
+                  {s.id > maxReachableStep ? " (complete earlier steps first)" : ""}
+                </option>
+              ))}
           </select>
         </div>
         <div className="mt-4 hidden md:block">
-          <ProgressBar value={completion} />
+          <ProgressBar value={loaderValue} />
         </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[240px_1fr]">
         <aside className="hidden md:block">
           <div className="space-y-1 border border-black/10 bg-white p-3">
-            {applicationSteps.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => tryGoToStep(s.id)}
-                disabled={s.id > maxReachableStep}
-                className={`flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm font-semibold ${
-                  step === s.id
-                    ? "bg-black text-white"
-                    : s.id > maxReachableStep
-                      ? "cursor-not-allowed text-[#bbb]"
-                      : "text-[#333] hover:bg-black/5"
-                }`}
-              >
-                <span
-                  className={`w-6 font-display text-xs font-black italic ${
-                    step === s.id ? "text-[var(--brand-gold)]" : "text-[#999]"
+            {scorecardOnly && (
+              <p className="mb-2 px-1 text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--brand-gold-dark)]">
+                Shared sections skipped
+              </p>
+            )}
+            {applicationSteps.map((s) => {
+              const active = activeSteps.includes(s.id);
+              const skipped = multiCategory && !active;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => tryGoToStep(s.id)}
+                  disabled={skipped || s.id > maxReachableStep}
+                  className={`flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm font-semibold ${
+                    step === s.id
+                      ? "bg-black text-white"
+                      : skipped
+                        ? "cursor-not-allowed text-[#bbb] line-through decoration-[#ccc]"
+                        : s.id > maxReachableStep
+                          ? "cursor-not-allowed text-[#bbb]"
+                          : "text-[#333] hover:bg-black/5"
                   }`}
                 >
-                  {String(s.id).padStart(2, "0")}
-                </span>
-                {s.label}
-              </button>
-            ))}
+                  <span
+                    className={`w-6 font-display text-xs font-black italic ${
+                      step === s.id ? "text-[var(--brand-gold)]" : "text-[#999]"
+                    }`}
+                  >
+                    {String(s.id).padStart(2, "0")}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    {s.label}
+                    {skipped ? (
+                      <span className="mt-0.5 block text-[10px] font-medium normal-case tracking-normal text-[#aaa] no-underline">
+                        From other category
+                      </span>
+                    ) : null}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </aside>
 
@@ -571,7 +736,7 @@ function WorkspaceInner({
                 answers={answers}
                 scorecard={scorecard}
                 confirm={confirm}
-                canEdit={appMeta.status === "DRAFT"}
+                canEdit={isDraft}
                 otherCategories={siblingApps.filter((s) => s.applicationId !== appMeta.id)}
                 buildSubmitPayload={buildSubmitPayload}
                 onEditStep={(targetStep) => {
@@ -581,7 +746,11 @@ function WorkspaceInner({
                   window.scrollTo({ top: 0, behavior: "smooth" });
                 }}
                 onSubmitted={(status) => {
-                  setAppMeta((m) => ({ ...m, status: status.replaceAll("_", " ") }));
+                  setAppMeta((m) => ({
+                    ...m,
+                    status: status.replaceAll("_", " "),
+                    statusRaw: status,
+                  }));
                   setDirty(false);
                   const nextDraft = siblingApps.find(
                     (s) => s.applicationId !== appMeta.id && s.status === "DRAFT",
@@ -613,15 +782,17 @@ function WorkspaceInner({
                 className="btn-ghost order-3 w-full sm:order-1 sm:w-auto"
                 onClick={() => {
                   const partial = collectStepAnswers();
-                  mergeAnswers(partial);
-                  setStep((s) => Math.max(1, s - 1));
+                  const merged = mergeAnswers(partial);
+                  const prev = prevActiveStep(step, merged, multiCategory);
+                  setStep(prev);
+                  void saveDraft(merged, prev);
                 }}
-                disabled={step === 1}
+                disabled={activeSteps[0] === step}
               >
                 ← Back
               </button>
               <div className="order-1 flex flex-col gap-2 sm:order-2 sm:flex-row sm:items-center">
-                {appMeta.status === "DRAFT" && (
+                {isDraft && (
                   <button
                     type="button"
                     className="btn-draft w-full sm:w-auto"
@@ -633,13 +804,21 @@ function WorkspaceInner({
                     {saving ? "Saving…" : "Save for later"}
                   </button>
                 )}
-                {step < applicationSteps.length && (
+                {!isDraft && (
+                  <Link
+                    href={`/nominate/applications/${appMeta.id}?view=status`}
+                    className="btn-secondary w-full sm:w-auto"
+                  >
+                    ← Back to status
+                  </Link>
+                )}
+                {isDraft && step !== activeSteps[activeSteps.length - 1] && (
                   <button
                     type="button"
                     className="btn-primary w-full sm:w-auto"
                     onClick={saveContinue}
                   >
-                    Next step →
+                    {scorecardOnly && step === 5 ? "Continue to review →" : "Next step →"}
                   </button>
                 )}
               </div>
@@ -662,6 +841,237 @@ export default function ApplicationWorkspacePage({
         <WorkspaceInner params={params} />
       </Suspense>
     </AuthGate>
+  );
+}
+
+function applicationStatusCopy(app: {
+  statusRaw: string;
+  adminDecision: "PENDING" | "ACCEPTED" | "REJECTED";
+  rejectionReason?: string;
+}) {
+  if (app.adminDecision === "REJECTED" || app.statusRaw === "NOT_QUALIFIED") {
+    return {
+      tone: "reject" as const,
+      title: "We are not proceeding with this application",
+      body:
+        app.rejectionReason ||
+        "The Awards Secretariat is not proceeding with this nomination.",
+    };
+  }
+  if (app.adminDecision === "ACCEPTED") {
+    return {
+      tone: "ok" as const,
+      title: "Verified — under jury evaluation",
+      body: "Admin verified your nomination. Independent jury evaluation is in progress.",
+    };
+  }
+  if (app.statusRaw === "CLARIFICATION_REQUIRED") {
+    return {
+      tone: "wait" as const,
+      title: "Action needed — clarification",
+      body: "The secretariat asked for more information. Open Messages to reply and upload what’s requested.",
+    };
+  }
+  if (
+    ["SUBMITTED", "ELIGIBILITY_REVIEW", "VERIFICATION", "READY_FOR_JURY"].includes(app.statusRaw)
+  ) {
+    return {
+      tone: "wait" as const,
+      title: "Awaiting Admin verification",
+      body: "Your nomination is with Admin. It will appear to the jury only after verification.",
+    };
+  }
+  if (["JURY_EVALUATION", "MODERATION_REQUIRED", "FINALIST", "FINAL_ASSESSMENT"].includes(app.statusRaw)) {
+    return {
+      tone: "ok" as const,
+      title: "Under evaluation",
+      body: "Your nomination is with the jury / moderation process. Watch Messages for updates.",
+    };
+  }
+  return {
+    tone: "wait" as const,
+    title: "Nomination received",
+    body: "Your submission is in the awards workflow. Status updates will appear here.",
+  };
+}
+
+function ApplicationStatusView({
+  appMeta,
+  siblingApps,
+  onViewAnswers,
+}: {
+  appMeta: {
+    id: string;
+    categoryTitle: string;
+    status: string;
+    statusRaw: string;
+    adminDecision: "PENDING" | "ACCEPTED" | "REJECTED";
+    rejectionReason?: string;
+    submittedAt?: string;
+    verifiedAt?: string;
+  };
+  siblingApps: {
+    applicationId: string;
+    categoryTitle: string;
+    categorySlug?: string;
+    status: string;
+  }[];
+  onViewAnswers: () => void;
+}) {
+  const info = applicationStatusCopy(appMeta);
+  const toneClass =
+    info.tone === "ok"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-950"
+      : info.tone === "reject"
+        ? "border-red-200 bg-red-50 text-red-950"
+        : "border-amber-200 bg-amber-50 text-amber-950";
+
+  const stages = [
+    { key: "submitted", label: "Submitted", done: appMeta.statusRaw !== "DRAFT" },
+    {
+      key: "review",
+      label: "Admin review",
+      done: ["VERIFICATION", "READY_FOR_JURY", "JURY_EVALUATION", "FINALIST", "FINAL_ASSESSMENT", "RANKING_READY", "RESULT_LOCKED"].includes(
+        appMeta.statusRaw,
+      ) || appMeta.adminDecision === "ACCEPTED",
+    },
+    {
+      key: "jury",
+      label: "Jury evaluation",
+      done: ["JURY_EVALUATION", "FINALIST", "FINAL_ASSESSMENT", "RANKING_READY", "RESULT_LOCKED"].includes(
+        appMeta.statusRaw,
+      ) || appMeta.adminDecision === "ACCEPTED",
+    },
+    {
+      key: "result",
+      label: "Result",
+      done: ["RANKING_READY", "RESULT_LOCKED"].includes(appMeta.statusRaw),
+    },
+  ];
+
+  return (
+    <div className="mx-auto max-w-3xl space-y-5">
+      <div className="border border-black/10 bg-white p-5 sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--brand-gold-dark)]">
+              Application status
+            </p>
+            <h1 className="mt-1 font-display text-2xl font-black italic uppercase sm:text-3xl">
+              {appMeta.categoryTitle}
+            </h1>
+            <p className="mt-1 text-sm text-[#888]">{appMeta.id}</p>
+            {appMeta.submittedAt && (
+              <p className="mt-1 text-xs text-[#666]">
+                Submitted {new Date(appMeta.submittedAt).toLocaleString()}
+              </p>
+            )}
+            {appMeta.verifiedAt && (
+              <p className="mt-0.5 text-xs text-[#666]">
+                Verified {new Date(appMeta.verifiedAt).toLocaleString()}
+              </p>
+            )}
+          </div>
+          <StatusPill status={appMeta.status} />
+        </div>
+
+        <div className={`mt-5 border px-4 py-3 text-sm ${toneClass}`}>
+          <p className="text-[10px] font-bold uppercase tracking-wide">{info.title}</p>
+          <p className="mt-1 text-sm">{info.body}</p>
+        </div>
+
+        <div className="mt-6 grid gap-2 sm:grid-cols-4">
+          {stages.map((s) => (
+            <div
+              key={s.key}
+              className={`border px-3 py-3 text-center ${
+                s.done
+                  ? "border-[var(--brand-gold)]/50 bg-[#faf6eb]"
+                  : "border-black/10 bg-[#f7f4f2]"
+              }`}
+            >
+              <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#888]">
+                {s.done ? "Done" : "Pending"}
+              </p>
+              <p className="mt-1 text-xs font-semibold uppercase tracking-tight">{s.label}</p>
+            </div>
+          ))}
+        </div>
+
+        {siblingApps.length > 0 && (
+          <div className="mt-6">
+            <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#888]">
+              Your categories
+            </p>
+            <div
+              className={`mt-2 grid gap-2 ${
+                siblingApps.length === 1 ? "grid-cols-1" : "grid-cols-2"
+              }`}
+            >
+              {siblingApps.map((sib) => {
+                const active = sib.applicationId === appMeta.id;
+                const code =
+                  getCategoryBySlug(sib.categorySlug || "")?.code ||
+                  awardCategories.find((c) => c.title === sib.categoryTitle)?.code ||
+                  "";
+                return (
+                  <Link
+                    key={sib.applicationId}
+                    href={
+                      sib.status === "DRAFT"
+                        ? `/nominate/applications/${sib.applicationId}?focus=scorecard`
+                        : `/nominate/applications/${sib.applicationId}?view=status`
+                    }
+                    className={`relative flex min-h-[7.5rem] flex-col justify-end overflow-hidden border p-3 transition ${
+                      active
+                        ? "border-[var(--brand-gold)] ring-2 ring-[var(--brand-gold)]"
+                        : "border-black/15 hover:border-[var(--brand-gold)]/60"
+                    }`}
+                  >
+                    {code ? (
+                      <CategoryBackdrop
+                        code={code}
+                        className="absolute inset-0 h-full w-full"
+                      />
+                    ) : (
+                      <div className="absolute inset-0 bg-[#2a1218]" />
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/45 to-black/15" />
+                    <div className="relative z-[1]">
+                      {code ? (
+                        <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--brand-gold)]">
+                          {code}
+                        </p>
+                      ) : null}
+                      <p className="mt-0.5 font-display text-xs font-bold uppercase leading-snug tracking-tight text-white sm:text-sm">
+                        {sib.categoryTitle}
+                      </p>
+                      <p className="mt-1 text-[10px] font-medium uppercase tracking-[0.08em] text-white/75">
+                        {sib.status.replaceAll("_", " ")}
+                      </p>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-6 flex flex-wrap gap-2">
+          <Link href="/nominate/dashboard" className="btn-secondary">
+            ← Dashboard
+          </Link>
+          {appMeta.statusRaw === "CLARIFICATION_REQUIRED" && (
+            <Link href="/nominate/messages" className="btn-primary">
+              Open Messages
+            </Link>
+          )}
+          <button type="button" className="btn-ghost" onClick={onViewAnswers}>
+            View submitted answers
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1491,6 +1901,11 @@ function ReviewSection({
     categoryTitle: string;
   } | null>(null);
   const [error, setError] = useState("");
+  const [missingFix, setMissingFix] = useState<{
+    label: string;
+    step: number;
+    stepLabel: string;
+  } | null>(null);
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [docs, setDocs] = useState<{ name: string; fileName?: string | null }[]>([]);
   useBodyScrollLock(busy);
@@ -1705,7 +2120,26 @@ function ReviewSection({
         Ready to Submit? Once submitted, major application information cannot be edited unless the
         Awards Secretariat formally reopens the application.
       </div>
-      {error && <p className="text-sm text-red-700">{error}</p>}
+      {error && (
+        <div className="space-y-2 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <p>{error}</p>
+          {missingFix && canEdit && (
+            <button
+              type="button"
+              className="btn-primary !min-h-9 !text-[10px]"
+              onClick={() => onEditStep(missingFix.step)}
+            >
+              Go to {missingFix.stepLabel}
+              {missingFix.label ? ` · ${missingFix.label}` : ""} →
+            </button>
+          )}
+          {!missingFix && error.toLowerCase().includes("documents") && (
+            <Link href="/nominate/documents" className="btn-primary !min-h-9 !text-[10px] inline-flex">
+              Go to Documents →
+            </Link>
+          )}
+        </div>
+      )}
       <div className="flex flex-col gap-2 sm:flex-row">
         <Link href="/nominate/dashboard" className="btn-secondary">
           Back to Dashboard
@@ -1733,6 +2167,7 @@ function ReviewSection({
               if (!ok) return;
               setBusy(true);
               setError("");
+              setMissingFix(null);
               try {
                 const draftJson = await buildSubmitPayload();
                 const missing = missingNominationFields(
@@ -1740,6 +2175,12 @@ function ReviewSection({
                   scorecard.length,
                 );
                 if (missing.length) {
+                  const first = missing[0];
+                  setMissingFix({
+                    label: first,
+                    step: stepForMissingField(first),
+                    stepLabel: stepLabelForMissingField(first),
+                  });
                   setError(
                     `Please complete all sections before submit. Still missing: ${missing.slice(0, 5).join(", ")}${missing.length > 5 ? "…" : ""}`,
                   );
@@ -1758,8 +2199,9 @@ function ReviewSection({
                   const pending = (docsCheck.mandatory || [])
                     .filter((m) => !m.done)
                     .map((m) => m.name);
+                  setMissingFix(null);
                   setError(
-                    `Complete remaining documents first (${docsCheck.completeCount}/${docsCheck.totalMandatory}). Pending: ${pending.join(", ")}. Upload a file or mark N/A.`,
+                    `Complete remaining documents first (${docsCheck.completeCount}/${docsCheck.totalMandatory}). Pending: ${pending.join(", ")}. Upload on Documents, then return here.`,
                   );
                   setBusy(false);
                   return;

@@ -88,11 +88,13 @@ function CategoryInner() {
   const [existingSlugs, setExistingSlugs] = useState<string[]>([]);
   const [incompleteOpen, setIncompleteOpen] = useState(false);
   const [highlightCats, setHighlightCats] = useState(false);
+  const [spotlight, setSpotlight] = useState(false);
   const [activity, setActivity] = useState("");
   const [age, setAge] = useState("");
   const [pride, setPride] = useState("");
   const [womanLed, setWomanLed] = useState("");
   const [young, setYoung] = useState("");
+  const cueStartedRef = useRef(false);
 
   const categoryDirty =
     !locked &&
@@ -267,8 +269,21 @@ function CategoryInner() {
     setMounted(true);
   }, []);
 
+  // Every page open: blur page + tip text fade in/out for 5s
   useEffect(() => {
-    if (!finderOpen) return;
+    if (!mounted || locked || loadingApps || cueStartedRef.current) return;
+    cueStartedRef.current = true;
+    setSpotlight(true);
+    const tipTimer = window.setTimeout(() => setSpotlight(false), 5000);
+    return () => window.clearTimeout(tipTimer);
+  }, [mounted, locked, loadingApps]);
+
+  useEffect(() => {
+    if (finderOpen) setSpotlight(false);
+  }, [finderOpen]);
+
+  useEffect(() => {
+    if (!finderOpen && !spotlight) return;
     const prevOverflow = document.body.style.overflow;
     const prevPadding = document.body.style.paddingRight;
     const scrollbar = window.innerWidth - document.documentElement.clientWidth;
@@ -278,7 +293,11 @@ function CategoryInner() {
       document.body.style.overflow = prevOverflow;
       document.body.style.paddingRight = prevPadding;
     };
-  }, [finderOpen]);
+  }, [finderOpen, spotlight]);
+
+  function dismissFinderCue() {
+    setSpotlight(false);
+  }
 
   return (
     <PortalShell
@@ -336,29 +355,57 @@ function CategoryInner() {
           </p>
         </div>
 
-        {/* Floating finder FAB — bottom right */}
-        {!finderOpen && !locked && (
-          <button
-            type="button"
-            onClick={() => setFinderOpen(true)}
-            className="finder-fab group fixed bottom-5 right-5 z-40 flex items-end gap-0 sm:bottom-6 sm:right-6"
-            aria-label="Find what fits you — open category recommendations"
-          >
-            <span className="finder-fab__label pointer-events-none mb-2 mr-2 hidden max-w-[11rem] translate-x-2 opacity-0 transition duration-200 group-hover:translate-x-0 group-hover:opacity-100 sm:block">
-              <span className="inline-block border border-[#1a0c10]/15 bg-[#1a0c10] px-3 py-2 text-left text-[10px] font-bold uppercase leading-snug tracking-[0.1em] text-white shadow-lg">
-                Not sure?
-                <br />
-                Find what fits you
-              </span>
-            </span>
-            <span className="finder-fab__btn relative flex h-14 w-14 items-center justify-center sm:h-16 sm:w-16">
-              <span className="finder-fab__ring" aria-hidden />
-              <span className="relative z-[1] font-display text-3xl font-black italic leading-none text-[#1a0c10] sm:text-4xl">
-                !
-              </span>
-            </span>
-          </button>
-        )}
+        {/* Blur + FAB tip cue (portaled above page isolate stacking) */}
+        {mounted &&
+          !finderOpen &&
+          !locked &&
+          createPortal(
+            <>
+              {spotlight && (
+                <button
+                  type="button"
+                  className="finder-spotlight"
+                  aria-label="Dismiss tip"
+                  onClick={dismissFinderCue}
+                />
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  dismissFinderCue();
+                  setFinderOpen(true);
+                }}
+                className={cn(
+                  "finder-fab group fixed bottom-5 right-5 flex items-end gap-0 sm:bottom-6 sm:right-6",
+                  spotlight ? "z-[60] finder-fab--spotlight" : "z-40",
+                )}
+                aria-label="Find what fits you — open category recommendations"
+              >
+                <span
+                  className={cn(
+                    "finder-fab__label pointer-events-none mb-2 mr-2 max-w-[11rem]",
+                    spotlight
+                      ? "finder-fab__label--cue"
+                      : "translate-x-2 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 group-focus-visible:translate-x-0 group-focus-visible:opacity-100",
+                  )}
+                >
+                  <span className="finder-fab__label-box inline-block border border-[var(--brand-gold)]/50 bg-[#1a0c10] px-3 py-2 text-left text-[10px] font-bold uppercase leading-snug tracking-[0.1em] text-white">
+                    Not sure?
+                    <br />
+                    Find what fits you
+                  </span>
+                </span>
+                <span className="finder-fab__btn relative flex h-14 w-14 items-center justify-center sm:h-16 sm:w-16">
+                  <span className="finder-fab__pulse" aria-hidden />
+                  <span className="finder-fab__ring" aria-hidden />
+                  <span className="relative z-[1] font-display text-3xl font-black italic leading-none text-[#1a0c10] sm:text-4xl">
+                    !
+                  </span>
+                </span>
+              </button>
+            </>,
+            document.body,
+          )}
 
         {mounted &&
           finderOpen &&

@@ -12,11 +12,20 @@ import {
 } from "@/components/portal/PortalShell";
 import { AuthGate } from "@/components/portal/AuthGate";
 import { useConfirm } from "@/components/portal/ConfirmDialog";
+import { CategoryBackdrop } from "@/components/awards/CategoryIcon";
+import { getCategoryBySlug } from "@/content/awards";
+import {
+  computeNominationProgress,
+  remainingAfterCommonProgress,
+  sharedAnswersReady,
+} from "@/lib/nominationCompleteness";
 import { apiGet, apiDelete, getStoredUser } from "@/lib/api";
 import { SkeletonStatRow, SkeletonCard } from "@/components/ui/Skeleton";
 
 type App = {
   applicationId: string;
+  categoryCode?: string;
+  categorySlug?: string;
   categoryTitle: string;
   status: string;
   progress: number;
@@ -24,6 +33,10 @@ type App = {
   adminDecision?: "PENDING" | "ACCEPTED" | "REJECTED";
   rejectionReason?: string;
   verifiedAt?: string;
+  draftJson?: {
+    step?: number;
+    answers?: Record<string, string>;
+  };
 };
 
 function decisionLabel(app: App) {
@@ -144,6 +157,49 @@ function DashboardInner() {
     ].includes(app.status);
   }
 
+  function categoryMeta(app: App) {
+    const bySlug = app.categorySlug ? getCategoryBySlug(app.categorySlug) : undefined;
+    return {
+      code: app.categoryCode || bySlug?.code || "",
+      title: app.categoryTitle || bySlug?.title || "Category",
+      criteriaCount: bySlug?.criteria?.length ?? 6,
+    };
+  }
+
+  function appProgress(app: App) {
+    if (app.status !== "DRAFT") return 100;
+    const answers = app.draftJson?.answers || {};
+    const step = typeof app.draftJson?.step === "number" ? app.draftJson.step : 1;
+    const { criteriaCount } = categoryMeta(app);
+    const computed = computeNominationProgress(answers, step, criteriaCount);
+    return Math.max(app.progress || 0, computed);
+  }
+
+  function progressLabel(app: App) {
+    if (app.status !== "DRAFT") return app.submittedAt ?? app.status.replaceAll("_", " ");
+    const answers = app.draftJson?.answers || {};
+    const step = typeof app.draftJson?.step === "number" ? app.draftJson.step : 1;
+    const { criteriaCount } = categoryMeta(app);
+    if (sharedAnswersReady(answers)) {
+      const remaining = remainingAfterCommonProgress(answers, step, criteriaCount);
+      if (remaining >= 100) return "Ready to submit";
+      return `${remaining}% of scorecard path · Draft`;
+    }
+    return `${appProgress(app)}% · Draft`;
+  }
+
+  function progressBarValue(app: App) {
+    if (app.status !== "DRAFT") return 100;
+    const answers = app.draftJson?.answers || {};
+    const step = typeof app.draftJson?.step === "number" ? app.draftJson.step : 1;
+    const { criteriaCount } = categoryMeta(app);
+    if (sharedAnswersReady(answers)) {
+      // After common questions: loader shows remaining scorecard/wrap-up work only
+      return remainingAfterCommonProgress(answers, step, criteriaCount);
+    }
+    return appProgress(app);
+  }
+
   async function deleteApplication(app: App) {
     const ok = await confirm({
       title: "Leave this category?",
@@ -169,7 +225,12 @@ function DashboardInner() {
   const draftApp = draftApps[0];
   const anySubmitted = apps.some((a) => a.status !== "DRAFT");
   const scorecardMode =
-    apps.length > 1 && (anySubmitted || apps.some((a) => a.progress >= 40));
+    apps.length > 1 &&
+    (anySubmitted ||
+      apps.some((a) => {
+        const answers = a.draftJson?.answers || {};
+        return sharedAnswersReady(answers) || appProgress(a) >= 40;
+      }));
   const submitted = anySubmitted && draftApps.length === 0;
   const reviewHref = draftApp
     ? `/nominate/applications/${draftApp.applicationId}${scorecardMode ? "?focus=scorecard" : ""}`
@@ -183,7 +244,9 @@ function DashboardInner() {
     if (app.status === "DRAFT" && scorecardMode) {
       return `/nominate/applications/${app.applicationId}?focus=scorecard`;
     }
-    return `/nominate/applications/${app.applicationId}`;
+    if (app.status === "DRAFT") return `/nominate/applications/${app.applicationId}`;
+    if (app.status === "CLARIFICATION_REQUIRED") return "/nominate/messages";
+    return `/nominate/applications/${app.applicationId}?view=status`;
   }
 
   function categoryFormLabel(app: App) {
@@ -329,60 +392,76 @@ function DashboardInner() {
             />
           </div>
 
-          {/* Guided workflow cards */}
-          <section className="mt-8 border border-black/10 bg-white p-5 sm:p-6">
-            <h2 className="font-display text-xl font-black italic uppercase">Your path to submit</h2>
-            <p className="mt-1 text-sm text-[#666]">
-              Complete each step in order. Locked steps open after the previous one is done.
-            </p>
-            <div className="mt-5 space-y-3">
-              {steps.map((s) => {
-                const cardClass = s.current
-                  ? "border-[#e8a914] bg-[#faf6eb]"
-                  : s.done
-                    ? "border-[var(--brand-gold)]/40 bg-white"
-                    : "border-black/10 bg-[#f7f4f2]";
-                const inner = (
-                  <div className={`flex flex-wrap items-center justify-between gap-3 border px-4 py-4 ${cardClass}`}>
-                    <div className="min-w-0">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--brand-gold-dark)]">
-                        Step {s.id}
-                        {s.current ? " · Current" : s.done ? " · Done" : s.locked ? " · Locked" : ""}
-                      </p>
-                      <p className="mt-1 font-display text-base font-bold uppercase tracking-tight">
-                        {s.title}
-                      </p>
-                      <p className="mt-1 text-sm text-[#555]">{s.body}</p>
+          {/* Guided workflow — hide once every application is submitted */}
+          {!submitted && (
+            <section className="mt-8 border border-black/10 bg-white p-5 sm:p-6">
+              <h2 className="font-display text-xl font-black italic uppercase">Your path to submit</h2>
+              <p className="mt-1 text-sm text-[#666]">
+                Complete each step in order. Locked steps open after the previous one is done.
+              </p>
+              <div className="mt-5 space-y-2">
+                {steps.map((s) => {
+                  const cardClass = s.current
+                    ? "min-h-[7.5rem] border-[#e8a914] bg-[#faf6eb] px-5 py-6 sm:min-h-[8.5rem] sm:py-7"
+                    : s.done
+                      ? "min-h-0 border-[var(--brand-gold)]/40 bg-white px-4 py-2.5"
+                      : "min-h-0 border-black/10 bg-[#f7f4f2] px-4 py-2.5";
+                  const inner = (
+                    <div
+                      className={`flex flex-wrap items-center justify-between gap-3 border transition-[min-height,padding] duration-300 ${cardClass}`}
+                    >
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--brand-gold-dark)]">
+                          Step {s.id}
+                          {s.current ? " · Current" : s.done ? " · Done" : s.locked ? " · Locked" : ""}
+                        </p>
+                        <p
+                          className={`mt-1 font-display font-bold uppercase tracking-tight ${
+                            s.current ? "text-lg sm:text-xl" : "text-sm"
+                          }`}
+                        >
+                          {s.title}
+                        </p>
+                        {s.current ? (
+                          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[#555]">{s.body}</p>
+                        ) : (
+                          <p className="mt-0.5 line-clamp-1 text-xs text-[#777]">{s.body}</p>
+                        )}
+                      </div>
+                      <div className="shrink-0">
+                        {s.locked ? (
+                          <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#888]">
+                            Complete prior step
+                          </span>
+                        ) : s.done && !s.current ? (
+                          <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--brand-gold-dark)]">
+                            Completed
+                          </span>
+                        ) : (
+                          <span
+                            className={`btn-secondary pointer-events-none !text-[10px] ${
+                              s.current ? "!min-h-11 !px-4" : "!min-h-8 !px-3"
+                            }`}
+                          >
+                            {s.id === 5 ? "Open review" : "Continue"}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="shrink-0">
-                      {s.locked ? (
-                        <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#888]">
-                          Complete prior step
-                        </span>
-                      ) : s.done && !s.current ? (
-                        <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--brand-gold-dark)]">
-                          Completed
-                        </span>
-                      ) : (
-                        <span className="btn-secondary pointer-events-none !min-h-9 !px-3 !text-[10px]">
-                          {s.id === 5 ? "Open review" : "Continue"}
-                        </span>
-                      )}
+                  );
+                  return s.locked ? (
+                    <div key={s.id} className="opacity-70">
+                      {inner}
                     </div>
-                  </div>
-                );
-                return s.locked ? (
-                  <div key={s.id} className="opacity-70">
-                    {inner}
-                  </div>
-                ) : (
-                  <Link key={s.id} href={s.href} className="block transition hover:opacity-95">
-                    {inner}
-                  </Link>
-                );
-              })}
-            </div>
-          </section>
+                  ) : (
+                    <Link key={s.id} href={s.href} className="block transition hover:opacity-95">
+                      {inner}
+                    </Link>
+                  );
+                })}
+              </div>
+            </section>
+          )}
 
           <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,20rem)] lg:items-start">
             <section className="border border-black/10 bg-white p-5 sm:p-6">
@@ -415,6 +494,7 @@ function DashboardInner() {
                   <div className="mt-5 space-y-3">
                     {apps.map((app) => {
                       const decision = decisionLabel(app);
+                      const barValue = progressBarValue(app);
                       return (
                         <div
                           key={app.applicationId}
@@ -433,10 +513,8 @@ function DashboardInner() {
                             <StatusPill status={app.status.replaceAll("_", " ")} />
                           </div>
                           <div className="mt-3">
-                            <ProgressBar value={app.progress} />
-                            <p className="mt-1 text-xs text-[#666]">
-                              {app.progress}% · {app.submittedAt ?? "Draft"}
-                            </p>
+                            <ProgressBar value={barValue} />
+                            <p className="mt-1 text-xs text-[#666]">{progressLabel(app)}</p>
                           </div>
 
                           {decision?.tone === "wait" && (
@@ -500,13 +578,6 @@ function DashboardInner() {
                       );
                     })}
                   </div>
-                  {draftApps.length > 0 && docsReady && (
-                    <Link href={reviewHref} className="btn-primary mt-5 inline-flex">
-                      {scorecardMode
-                        ? `Continue · ${draftApps[0].categoryTitle} scorecard →`
-                        : "Continue nomination →"}
-                    </Link>
-                  )}
                 </>
               ) : (
                 <p className="mt-4 text-sm text-[#666]">
@@ -528,8 +599,39 @@ function DashboardInner() {
                 Up to 2 categories ({apps.length}/2). Same business details for all — only the
                 scorecard differs per category.
               </p>
+              {apps.length > 0 && (
+                <div className="mt-4 grid grid-cols-1 gap-2">
+                  {apps.map((app) => {
+                    const meta = categoryMeta(app);
+                    return (
+                      <div
+                        key={app.applicationId}
+                        className="relative min-h-[6.5rem] overflow-hidden border border-black/15"
+                      >
+                        {meta.code ? (
+                          <CategoryBackdrop
+                            code={meta.code}
+                            className="absolute inset-0 h-full w-full"
+                          />
+                        ) : (
+                          <div className="absolute inset-0 bg-[#2a1218]" />
+                        )}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-black/15" />
+                        <div className="relative z-[1] flex h-full min-h-[6.5rem] flex-col justify-end p-3">
+                          <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--brand-gold)]">
+                            {meta.code || "Selected"}
+                          </p>
+                          <p className="mt-1 font-display text-sm font-bold uppercase leading-snug text-white">
+                            {app.categoryTitle}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               {apps.length >= 2 ? (
-                <p className="mt-5 border border-black/10 bg-[#f7f4f2] px-4 py-3 text-sm text-[#555]">
+                <p className="mt-4 border border-black/10 bg-[#f7f4f2] px-4 py-3 text-sm text-[#555]">
                   Category limit reached (2/2). Leave a category above if you need to change.
                 </p>
               ) : !profileComplete ? (
