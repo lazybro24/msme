@@ -352,7 +352,11 @@ function WorkspaceInner({
   return (
     <PortalShell
       brand="Application Workspace"
-      subtitle={`${appMeta.categoryTitle} · ${appMeta.id}`}
+      subtitle={
+        siblingApps.length > 1
+          ? `Participating in ${siblingApps.length} categories · ${appMeta.id}`
+          : `${appMeta.categoryTitle} · ${appMeta.id}`
+      }
       nav={applicantNav}
       userLabel={appMeta.status}
     >
