@@ -1005,7 +1005,7 @@ function EvidenceSection({
         (max {MAX_UPLOAD_MB} MB).
       </p>
       {msg && (
-        <p className="border border-[#e8a914]/30 bg-[#faf6eb] px-3 py-2 text-sm">{msg}</p>
+        <p className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">{msg}</p>
       )}
       {docs.map((d) => {
         const key = d.id || d.name;
