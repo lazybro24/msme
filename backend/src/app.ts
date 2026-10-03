@@ -4,6 +4,8 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { healthRouter } from "./routes/health";
 
+type RootState = { status: string; storage: string };
+
 function applyBaseMiddleware(app: Express) {
   const raw = process.env.CORS_ORIGIN || "http://localhost:3000";
   const origins = raw.split(",").map((s) => s.trim()).filter(Boolean);
@@ -33,10 +35,32 @@ export function createApp(): Express {
   applyBaseMiddleware(app);
 
   app.use("/api/health", healthRouter);
+
+  // Single root handler — mountApiRoutes flips status/storage after routes load.
+  // (Express keeps the first app.get("/") forever; registering a second one never runs.)
+  const rootState: RootState = { status: "booting", storage: "pending" };
+  app.locals.rootState = rootState;
+
   app.get("/", (_req, res) => {
+    const state = app.locals.rootState as RootState;
+    if (state.status === "ok") {
+      return res.json({
+        name: "Mysuru MSME Awards 2026 API",
+        mode: "postgresql (Neon / Prisma)",
+        storage: state.storage,
+        docs: {
+          auth: "POST /api/auth/login | /register | /verify-totp",
+          files: "GET /api/files/:kind/:filename (Bearer or ?token=)",
+          applications: "/api/applications",
+          clarifications: "/api/clarifications",
+          evaluations: "/api/evaluations",
+          admin: "/api/admin/*",
+        },
+      });
+    }
     res.json({
       name: "Mysuru MSME Awards 2026 API",
-      status: "booting",
+      status: state.status,
       health: "/api/health",
     });
   });
@@ -110,20 +134,9 @@ export async function mountApiRoutes(app: Express): Promise<void> {
   app.use("/api/partnerships", partnershipsRouter);
   app.use("/api", miscRouter);
 
-  // Replace boot root with full info
-  app.get("/", (_req, res) => {
-    res.json({
-      name: "Mysuru MSME Awards 2026 API",
-      mode: "postgresql (Neon / Prisma)",
-      storage: storageMode(),
-      docs: {
-        auth: "POST /api/auth/login | /register | /verify-totp",
-        files: "GET /api/files/:kind/:filename (Bearer or ?token=)",
-        applications: "/api/applications",
-        clarifications: "/api/clarifications",
-        evaluations: "/api/evaluations",
-        admin: "/api/admin/*",
-      },
-    });
-  });
+  const rootState = app.locals.rootState as RootState | undefined;
+  if (rootState) {
+    rootState.status = "ok";
+    rootState.storage = storageMode();
+  }
 }
