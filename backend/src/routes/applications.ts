@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import type { ApplicationStatus } from "@prisma/client";
+import type { ApplicationStatus, Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { AuthRequest, requireAuth, requireRoles } from "../lib/auth";
 import {
@@ -13,6 +13,42 @@ import {
 } from "../lib/users";
 
 export const applicationsRouter = Router();
+
+/** Shared nomination answers — everything except category scorecard questions. */
+function pickSharedAnswers(answers: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(answers).filter(([k]) => !k.startsWith("category_q_")),
+  );
+}
+
+async function siblingSharedDraftSeed(applicantId: string): Promise<Prisma.InputJsonValue | null> {
+  const siblings = await prisma.application.findMany({
+    where: { applicantId, status: "DRAFT" },
+    orderBy: { updatedAt: "desc" },
+  });
+  for (const sib of siblings) {
+    const draft =
+      sib.draftJson && typeof sib.draftJson === "object" && !Array.isArray(sib.draftJson)
+        ? (sib.draftJson as {
+            step?: number;
+            answers?: Record<string, unknown>;
+            documents?: unknown;
+            savedAt?: string;
+          })
+        : null;
+    if (!draft?.answers || !Object.keys(draft.answers).length) continue;
+    const shared = pickSharedAnswers(draft.answers);
+    if (!Object.keys(shared).length) continue;
+    return {
+      step: typeof draft.step === "number" ? Math.min(draft.step, 4) : 1,
+      answers: shared as Prisma.InputJsonValue,
+      documents: (draft.documents ?? null) as Prisma.InputJsonValue,
+      savedAt: draft.savedAt ?? new Date().toISOString(),
+      seededFromSibling: true,
+    };
+  }
+  return null;
+}
 
 const STATUSES: ApplicationStatus[] = [
   "DRAFT",
@@ -150,6 +186,7 @@ applicationsRouter.post(
     }
 
     const org = await prisma.organisation.findUnique({ where: { ownerId: user.id } });
+    const seedDraft = await siblingSharedDraftSeed(user.id);
     const created = [];
     for (const cat of parsed.data.categories) {
       const applicationId = await nextApplicationId(cat.categoryCode);
@@ -160,7 +197,14 @@ applicationsRouter.post(
           categorySlug: cat.categorySlug,
           categoryTitle: cat.categoryTitle,
           status: "DRAFT",
-          progress: 5,
+          progress: seedDraft
+            ? Math.max(
+                5,
+                Math.round(
+                  ((((seedDraft as { step?: number }).step || 1) as number) / 10) * 100,
+                ),
+              )
+            : 5,
           applicantId: user.id,
           organisationId: org?.id,
           organisationName:
@@ -168,6 +212,7 @@ applicationsRouter.post(
           sector: org?.industry || "General",
           msme: org?.classification || "Small",
           adminDecision: "PENDING",
+          ...(seedDraft ? { draftJson: seedDraft } : {}),
         },
       });
       created.push(app);
@@ -177,12 +222,19 @@ applicationsRouter.post(
         action: "APPLICATION_CREATED",
         applicationId,
       });
-      await notify(user.id, "Application created", `${applicationId} draft started.`);
+      await notify(
+        user.id,
+        "Category added",
+        `${cat.categoryTitle} added to your nomination (${applicationId}).`,
+      );
     }
 
     res.status(201).json({
       applications: created.map(appToApi),
-      message: existingCount > 0 ? "Category application added" : "Categories saved",
+      message:
+        existingCount > 0
+          ? "Category added to your nomination"
+          : "Categories saved — one nomination form covers shared answers",
     });
   },
 );
@@ -221,6 +273,7 @@ applicationsRouter.post("/", requireAuth, requireRoles("APPLICANT", "ADMINISTRAT
   }
 
   const org = await prisma.organisation.findUnique({ where: { ownerId: user.id } });
+  const seedDraft = await siblingSharedDraftSeed(user.id);
   const applicationId = await nextApplicationId(parsed.data.categoryCode);
   const app = await prisma.application.create({
     data: {
@@ -229,13 +282,19 @@ applicationsRouter.post("/", requireAuth, requireRoles("APPLICANT", "ADMINISTRAT
       categorySlug: parsed.data.categorySlug,
       categoryTitle: parsed.data.categoryTitle,
       status: "DRAFT",
-      progress: 5,
+      progress: seedDraft
+        ? Math.max(
+            5,
+            Math.round(((((seedDraft as { step?: number }).step || 1) as number) / 10) * 100),
+          )
+        : 5,
       applicantId: user.id,
       organisationId: org?.id,
       organisationName: parsed.data.organisationName || org?.legalName || user.orgName || "Organisation",
       sector: parsed.data.sector || org?.industry || "General",
       msme: parsed.data.msme || org?.classification || "Small",
       adminDecision: "PENDING",
+      ...(seedDraft ? { draftJson: seedDraft } : {}),
     },
   });
 
@@ -245,7 +304,11 @@ applicationsRouter.post("/", requireAuth, requireRoles("APPLICANT", "ADMINISTRAT
     action: "APPLICATION_CREATED",
     applicationId,
   });
-  await notify(user.id, "Application created", `${applicationId} draft started.`);
+  await notify(
+    user.id,
+    "Category added",
+    `${parsed.data.categoryTitle} added to your nomination (${applicationId}).`,
+  );
   res.status(201).json({ application: appToApi(app) });
 });
 
@@ -274,6 +337,51 @@ applicationsRouter.patch("/:applicationId", requireAuth, async (req: AuthRequest
     where: { id: app.id },
     data,
   });
+
+  // Sync shared answers to sibling category drafts (one nomination, multiple categories)
+  if (data.draftJson && typeof data.draftJson === "object") {
+    const draft = data.draftJson as {
+      step?: number;
+      answers?: Record<string, unknown>;
+      documents?: unknown;
+      savedAt?: string;
+    };
+    const sharedAnswers = pickSharedAnswers(draft.answers || {});
+    if (Object.keys(sharedAnswers).length) {
+      const siblings = await prisma.application.findMany({
+        where: {
+          applicantId: app.applicantId,
+          status: "DRAFT",
+          NOT: { id: app.id },
+        },
+      });
+      for (const sib of siblings) {
+        const prev =
+          sib.draftJson && typeof sib.draftJson === "object"
+            ? (sib.draftJson as {
+                step?: number;
+                answers?: Record<string, unknown>;
+                documents?: unknown;
+                savedAt?: string;
+              })
+            : {};
+        const categoryOnly = Object.fromEntries(
+          Object.entries(prev.answers || {}).filter(([k]) => k.startsWith("category_q_")),
+        );
+        await prisma.application.update({
+          where: { id: sib.id },
+          data: {
+            draftJson: {
+              ...prev,
+              answers: { ...sharedAnswers, ...categoryOnly } as Prisma.InputJsonValue,
+              documents: (draft.documents ?? prev.documents ?? null) as Prisma.InputJsonValue,
+              savedAt: draft.savedAt ?? prev.savedAt,
+            } as Prisma.InputJsonValue,
+          },
+        });
+      }
+    }
+  }
 
   // Keep org-level uploads linked to this application when saving a draft
   if (data.draftJson && app.organisationId) {

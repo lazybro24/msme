@@ -148,10 +148,10 @@ function DashboardInner() {
 
   async function deleteApplication(app: App) {
     const ok = await confirm({
-      title: "Delete this application?",
-      message: `Deleting this application will remove you from participating in “${app.categoryTitle}”. Your draft answers for this category will be permanently removed. This cannot be undone.`,
-      confirmLabel: "Yes, delete application",
-      cancelLabel: "Keep application",
+      title: "Leave this category?",
+      message: `This removes “${app.categoryTitle}” from your nomination. Shared answers in other categories stay. This cannot be undone.`,
+      confirmLabel: "Yes, leave category",
+      cancelLabel: "Keep category",
     });
     if (!ok) return;
     setDeletingId(app.applicationId);
@@ -159,7 +159,7 @@ function DashboardInner() {
       await apiDelete(`/api/applications/${app.applicationId}`);
       await loadApps();
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : "Could not delete application");
+      window.alert(e instanceof Error ? e.message : "Could not leave this category");
     } finally {
       setDeletingId(null);
     }
@@ -174,6 +174,7 @@ function DashboardInner() {
     : apps[0]
       ? `/nominate/applications/${apps[0].applicationId}`
       : "/nominate/categories";
+  const categoryNames = apps.map((a) => a.categoryTitle).filter(Boolean);
 
   const accountDone = true;
   const profileDone = profileComplete;
@@ -226,7 +227,10 @@ function DashboardInner() {
       id: 5,
       label: "5. Nomination form",
       title: "Complete nomination form",
-      body: "Answer each section in order, then review and submit for verification.",
+      body:
+        apps.length > 1
+          ? `One shared form for your nomination. Category-specific questions cover: ${categoryNames.join(" · ")}.`
+          : "Answer each section in order, then review and submit for verification.",
       href: reviewHref,
       done: submitDone,
       locked: !profileDone || !categoryDone || !documentsDone,
@@ -289,7 +293,15 @@ function DashboardInner() {
       ) : (
         <>
           <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            <StatCard label="Applications" value={`${apps.length} / 2`} />
+            <StatCard
+              label="Categories"
+              value={apps.length ? `${apps.length} / 2` : "0 / 2"}
+              hint={
+                categoryNames.length
+                  ? categoryNames.join(" · ")
+                  : "Choose up to 2"
+              }
+            />
             <StatCard label="Profile" value={profileComplete ? "Ready" : "Incomplete"} />
             <StatCard
               label="Documents"
@@ -360,125 +372,157 @@ function DashboardInner() {
 
           <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,20rem)] lg:items-start">
             <section className="border border-black/10 bg-white p-5 sm:p-6">
-              <h2 className="font-display text-xl font-black italic uppercase">My Applications</h2>
-              <div className="mt-6 space-y-4">
-                {apps.map((app) => {
-                  const decision = decisionLabel(app);
-                  return (
-                    <div key={app.applicationId} className="border border-black/10 p-4 sm:p-5">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <h3 className="font-display text-base font-bold uppercase tracking-tight">
-                            {app.categoryTitle}
-                          </h3>
-                          <p className="text-sm text-[#888]">{app.applicationId}</p>
-                        </div>
-                        <StatusPill status={app.status.replaceAll("_", " ")} />
-                      </div>
-                      <div className="mt-4">
-                        <ProgressBar value={app.progress} />
-                        <p className="mt-2 text-xs text-[#666]">
-                          {app.progress}% · {app.submittedAt ?? "Draft"}
-                        </p>
-                      </div>
-
-                      {decision?.tone === "wait" && (
-                        <div className="mt-4 border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-                          <p className="font-bold uppercase tracking-wide text-[10px]">
-                            {decision.title}
-                          </p>
-                          <p className="mt-1">{decision.body}</p>
-                          {app.status === "CLARIFICATION_REQUIRED" && (
-                            <Link href="/nominate/messages" className="mt-2 inline-block font-semibold underline">
-                              Go to Messages
-                            </Link>
-                          )}
-                        </div>
-                      )}
-                      {decision?.tone === "ok" && (
-                        <div className="mt-4 border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
-                          <p className="font-bold uppercase tracking-wide text-[10px]">
-                            {decision.title}
-                          </p>
-                          <p className="mt-1">{decision.body}</p>
-                        </div>
-                      )}
-                      {decision?.tone === "reject" && (
-                        <div className="mt-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-950">
-                          <p className="font-bold uppercase tracking-wide text-[10px]">
-                            {decision.title}
-                          </p>
-                          <p className="mt-1">{decision.body}</p>
-                        </div>
-                      )}
-
-                      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex flex-wrap gap-2">
-                          {!docsReady && app.status === "DRAFT" && (
-                            <Link href="/nominate/documents" className="btn-secondary">
-                              Upload documents first
-                            </Link>
-                          )}
-                          <Link
-                            href={
-                              !docsReady && app.status === "DRAFT"
-                                ? "/nominate/documents"
-                                : `/nominate/applications/${app.applicationId}`
-                            }
-                            className={docsReady || app.status !== "DRAFT" ? "btn-secondary" : "btn-ghost"}
-                          >
-                            {app.status === "DRAFT"
-                              ? docsReady
-                                ? "Continue nomination form"
-                                : "Finish documents first"
-                              : app.status === "CLARIFICATION_REQUIRED"
-                                ? "Open Messages / application"
-                                : "View application"}
-                          </Link>
-                        </div>
-                        {canDeleteApp(app) && (
-                          <button
-                            type="button"
-                            className="btn-ghost !border-red-200 !text-red-800 hover:!border-red-400"
-                            disabled={deletingId === app.applicationId}
-                            onClick={() => void deleteApplication(app)}
-                          >
-                            {deletingId === app.applicationId ? "Deleting…" : "Delete application"}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-                {!apps.length && (
-                  <p className="text-sm text-[#666]">
-                    {!profileComplete
-                      ? "Complete your business details first, then select a category."
-                      : "No applications yet — select an award category to continue."}
+              <h2 className="font-display text-xl font-black italic uppercase">Your nomination</h2>
+              {apps.length > 0 ? (
+                <>
+                  <p className="mt-2 text-sm text-[#666]">
+                    Participating in{" "}
+                    <span className="font-semibold text-[#1a1814]">
+                      {apps.length} categor{apps.length === 1 ? "y" : "ies"}
+                    </span>
+                    : {categoryNames.join(" · ")}. Shared answers are filled once; only category
+                    scorecard questions differ.
                   </p>
-                )}
-              </div>
+                  <div className="mt-5 space-y-3">
+                    {apps.map((app) => {
+                      const decision = decisionLabel(app);
+                      return (
+                        <div
+                          key={app.applicationId}
+                          className="border border-black/10 bg-[#faf8f6] px-4 py-4"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--brand-gold-dark)]">
+                                Category
+                              </p>
+                              <h3 className="mt-1 font-display text-base font-bold uppercase tracking-tight">
+                                {app.categoryTitle}
+                              </h3>
+                              <p className="text-xs text-[#888]">{app.applicationId}</p>
+                            </div>
+                            <StatusPill status={app.status.replaceAll("_", " ")} />
+                          </div>
+                          <div className="mt-3">
+                            <ProgressBar value={app.progress} />
+                            <p className="mt-1 text-xs text-[#666]">
+                              {app.progress}% · {app.submittedAt ?? "Draft"}
+                            </p>
+                          </div>
+
+                          {decision?.tone === "wait" && (
+                            <div className="mt-3 border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+                              <p className="text-[10px] font-bold uppercase tracking-wide">
+                                {decision.title}
+                              </p>
+                              <p className="mt-1 text-xs">{decision.body}</p>
+                              {app.status === "CLARIFICATION_REQUIRED" && (
+                                <Link
+                                  href="/nominate/messages"
+                                  className="mt-1 inline-block text-xs font-semibold underline"
+                                >
+                                  Go to Messages
+                                </Link>
+                              )}
+                            </div>
+                          )}
+                          {decision?.tone === "ok" && (
+                            <div className="mt-3 border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
+                              <p className="text-[10px] font-bold uppercase tracking-wide">
+                                {decision.title}
+                              </p>
+                              <p className="mt-1 text-xs">{decision.body}</p>
+                            </div>
+                          )}
+                          {decision?.tone === "reject" && (
+                            <div className="mt-3 border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-950">
+                              <p className="text-[10px] font-bold uppercase tracking-wide">
+                                {decision.title}
+                              </p>
+                              <p className="mt-1 text-xs">{decision.body}</p>
+                            </div>
+                          )}
+
+                          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex flex-wrap gap-2">
+                              {!docsReady && app.status === "DRAFT" && (
+                                <Link href="/nominate/documents" className="btn-secondary !min-h-9 !text-[10px]">
+                                  Upload documents first
+                                </Link>
+                              )}
+                              <Link
+                                href={
+                                  !docsReady && app.status === "DRAFT"
+                                    ? "/nominate/documents"
+                                    : `/nominate/applications/${app.applicationId}`
+                                }
+                                className={
+                                  docsReady || app.status !== "DRAFT"
+                                    ? "btn-primary !min-h-9 !text-[10px]"
+                                    : "btn-ghost !min-h-9 !text-[10px]"
+                                }
+                              >
+                                {app.status === "DRAFT"
+                                  ? docsReady
+                                    ? apps.length > 1
+                                      ? "Open form · this category"
+                                      : "Continue nomination form"
+                                    : "Finish documents first"
+                                  : app.status === "CLARIFICATION_REQUIRED"
+                                    ? "Open Messages"
+                                    : "View category"}
+                              </Link>
+                            </div>
+                            {canDeleteApp(app) && (
+                              <button
+                                type="button"
+                                className="btn-ghost !min-h-9 !border-red-200 !px-2 !text-[10px] !text-red-800 hover:!border-red-400"
+                                disabled={deletingId === app.applicationId}
+                                onClick={() => void deleteApplication(app)}
+                              >
+                                {deletingId === app.applicationId ? "Removing…" : "Leave category"}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {apps.some((a) => a.status === "DRAFT") && docsReady && (
+                    <Link href={reviewHref} className="btn-secondary mt-5 inline-flex">
+                      Continue shared nomination form →
+                    </Link>
+                  )}
+                </>
+              ) : (
+                <p className="mt-4 text-sm text-[#666]">
+                  {!profileComplete
+                    ? "Complete your business details first, then select award categories."
+                    : "No categories yet — select up to 2 award categories to participate."}
+                </p>
+              )}
             </section>
 
             <aside className="border border-black/10 bg-white p-5 sm:p-6">
               <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--brand-gold-dark)]">
-                Participate
+                Categories
               </p>
               <h2 className="mt-1 font-display text-xl font-black italic uppercase">
-                New application
+                {apps.length ? "Add a category" : "Choose categories"}
               </h2>
               <p className="mt-2 text-sm text-[#666]">
-                Nominate for another award category. You can hold up to 2 applications (
-                {apps.length}/2 used).
+                You can participate in up to 2 award categories ({apps.length}/2). Shared form
+                answers apply to all; only scorecard questions are per category.
               </p>
               {apps.length >= 2 ? (
                 <p className="mt-5 border border-black/10 bg-[#f7f4f2] px-4 py-3 text-sm text-[#555]">
-                  Application limit reached. Open an existing nomination from My Applications.
+                  Category limit reached (2/2). Open the nomination form above or leave a category
+                  to change.
                 </p>
               ) : !profileComplete ? (
                 <div className="mt-5 space-y-3">
                   <p className="text-sm text-[#555]">
-                    Complete your business profile before starting a new nomination.
+                    Complete your business profile before selecting categories.
                   </p>
                   <Link href="/nominate/profile" className="btn-primary inline-flex">
                     Complete profile
@@ -486,7 +530,7 @@ function DashboardInner() {
                 </div>
               ) : (
                 <Link href="/nominate/categories" className="btn-primary mt-5 inline-flex">
-                  Create new application
+                  {apps.length ? "Add another category" : "Select categories"}
                 </Link>
               )}
             </aside>

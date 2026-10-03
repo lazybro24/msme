@@ -324,12 +324,13 @@ function CategoryInner() {
             {locked
               ? "Your categories are saved and locked (2/2). Selection cannot be changed."
               : existingSlugs.length
-                ? `You already have ${existingSlugs.length} application${existingSlugs.length === 1 ? "" : "s"}. Select ${2 - existingSlugs.length} more (max 2), then save.`
+                ? `Participating in ${existingSlugs.length} categor${existingSlugs.length === 1 ? "y" : "ies"} already. You can add ${2 - existingSlugs.length} more (max 2), then save.`
                 : (
                 <>
-                  Max 2 awards can be selected. Click on{" "}
+                  Choose up to 2 award categories for one nomination. Shared answers are filled
+                  once; only category scorecard questions differ. Click{" "}
                   <span className="font-semibold text-[var(--brand-gold-dark)]">!</span> for
-                  recommendations. Save to lock your choice.
+                  recommendations.
                 </>
               )}
           </p>

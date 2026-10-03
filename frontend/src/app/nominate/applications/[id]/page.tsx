@@ -70,6 +70,9 @@ function WorkspaceInner({
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [siblingApps, setSiblingApps] = useState<
+    { applicationId: string; categoryTitle: string; status: string }[]
+  >([]);
   const stepRootRef = useRef<HTMLDivElement>(null);
   const answersRef = useRef<Answers>({});
   const { confirm, dialog: confirmDialog } = useConfirm();
@@ -144,6 +147,21 @@ function WorkspaceInner({
             : 1;
         // Never resume past the first incomplete section
         setStep(Math.min(draftStep, resume));
+
+        try {
+          const list = await apiGet<{
+            applications: {
+              applicationId: string;
+              categoryTitle: string;
+              status: string;
+            }[];
+          }>("/api/applications");
+          if (!cancelled) {
+            setSiblingApps(list.applications || []);
+          }
+        } catch {
+          if (!cancelled) setSiblingApps([]);
+        }
       } catch {
         /* ignore */
       } finally {
@@ -352,12 +370,19 @@ function WorkspaceInner({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--brand-gold-dark)]">
-              Application Completion — {completion}%
+              Nomination form — {completion}%
             </p>
             <h1 className="mt-1 font-display text-2xl font-black italic uppercase sm:text-3xl">
               {appMeta.categoryTitle}
             </h1>
             <p className="text-sm text-[#888]">{appMeta.id}</p>
+            {siblingApps.length > 1 && (
+              <p className="mt-2 text-sm text-[#555]">
+                Participating in {siblingApps.length} categories:{" "}
+                {siblingApps.map((a) => a.categoryTitle).join(" · ")}. Shared answers save to both;
+                switch below for category-specific questions.
+              </p>
+            )}
             {savedAt && (
               <p className="mt-1 text-xs text-[#666]">Draft saved at {savedAt}</p>
             )}
@@ -367,6 +392,46 @@ function WorkspaceInner({
           </div>
           <StatusPill status={appMeta.status} />
         </div>
+
+        {siblingApps.length > 1 && (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {siblingApps.map((sib) => {
+              const active = sib.applicationId === appMeta.id;
+              return (
+                <button
+                  key={sib.applicationId}
+                  type="button"
+                  disabled={active || saving}
+                  onClick={() => {
+                    if (dirty && appMeta.status === "DRAFT") {
+                      void saveDraft()
+                        .then(() => {
+                          router.push(`/nominate/applications/${sib.applicationId}`);
+                        })
+                        .catch(() => {
+                          router.push(`/nominate/applications/${sib.applicationId}`);
+                        });
+                    } else {
+                      router.push(`/nominate/applications/${sib.applicationId}`);
+                    }
+                  }}
+                  className={`min-h-10 border px-3 py-2 text-left text-xs font-bold uppercase tracking-[0.08em] transition ${
+                    active
+                      ? "border-[#1a1814] bg-[#1a1814] text-white"
+                      : "border-black/15 bg-[#f7f4f2] text-[#333] hover:border-[#1a1814]/40"
+                  }`}
+                >
+                  {sib.categoryTitle}
+                  <span className="mt-0.5 block text-[10px] font-medium normal-case tracking-normal opacity-70">
+                    {sib.status.replaceAll("_", " ")}
+                    {active ? " · editing" : ""}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         <div className="mt-4 md:hidden">
           <ProgressBar value={completion} />
           <label className="label mt-4">
@@ -460,6 +525,7 @@ function WorkspaceInner({
                 scorecard={scorecard}
                 confirm={confirm}
                 canEdit={appMeta.status === "DRAFT"}
+                otherCategories={siblingApps.filter((s) => s.applicationId !== appMeta.id)}
                 buildSubmitPayload={buildSubmitPayload}
                 onEditStep={(targetStep) => {
                   const partial = collectStepAnswers();
@@ -470,7 +536,18 @@ function WorkspaceInner({
                 onSubmitted={(status) => {
                   setAppMeta((m) => ({ ...m, status: status.replaceAll("_", " ") }));
                   setDirty(false);
-                  setSubmitMsg("Application submitted — Eligibility Review");
+                  setSubmitMsg(
+                    siblingApps.length > 1
+                      ? `Submitted for ${appMeta.categoryTitle}. Switch category above if you still need to submit another.`
+                      : "Application submitted — Eligibility Review",
+                  );
+                  setSiblingApps((list) =>
+                    list.map((s) =>
+                      s.applicationId === appMeta.id
+                        ? { ...s, status: status }
+                        : s,
+                    ),
+                  );
                 }}
               />
             )}
@@ -777,6 +854,10 @@ function CategoryQuestionsSection({
 }) {
   return (
     <div className="mt-4 space-y-4">
+      <p className="text-sm text-[#666]">
+        These questions are specific to this award category. Shared sections (overview, performance,
+        Mysuru, declaration) apply to all categories you selected.
+      </p>
       <p className="text-sm text-[#666]">
         Answer at least the first category question to continue. Other scorecard answers are
         optional but strengthen your nomination.
@@ -1216,6 +1297,7 @@ function ReviewSection({
   scorecard,
   confirm,
   canEdit,
+  otherCategories = [],
   onEditStep,
   buildSubmitPayload,
   onSubmitted,
@@ -1231,6 +1313,7 @@ function ReviewSection({
     cancelLabel?: string;
   }) => Promise<boolean>;
   canEdit: boolean;
+  otherCategories?: { applicationId: string; categoryTitle: string; status: string }[];
   onEditStep: (step: number) => void;
   buildSubmitPayload: () => Promise<{
     step: number;
@@ -1343,12 +1426,18 @@ function ReviewSection({
             </h3>
             <div className="mt-3 inline-flex max-w-full flex-col gap-1 border border-[var(--brand-gold)]/50 bg-[var(--brand-gold)]/10 px-3 py-2">
               <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--brand-gold-dark)]">
-                Chosen category
+                {otherCategories.length ? "Submitting for category" : "Chosen category"}
               </p>
               <p className="font-display text-base font-black italic uppercase leading-snug">
                 {categoryTitle}
               </p>
               <p className="text-[10px] text-[#666]">{applicationId}</p>
+              {otherCategories.length > 0 && (
+                <p className="mt-1 text-[10px] text-[#555]">
+                  Also participating in:{" "}
+                  {otherCategories.map((c) => c.categoryTitle).join(" · ")}
+                </p>
+              )}
             </div>
           </header>
 
@@ -1462,8 +1551,9 @@ function ReviewSection({
             onClick={async () => {
               const ok = await confirm({
                 title: "Are you sure?",
-                message:
-                  "Submit this application for eligibility review? Your answers, declaration, and uploaded document list will be saved to the database first. After submit, major details cannot be edited unless the Awards Secretariat reopens it.",
+                message: otherCategories.length
+                  ? `Submit “${categoryTitle}” for eligibility review? Shared answers were saved across your categories. After submit, switch to another category tab if you still need to submit there.`
+                  : "Submit this application for eligibility review? Your answers, declaration, and uploaded document list will be saved to the database first. After submit, major details cannot be edited unless the Awards Secretariat reopens it.",
                 confirmLabel: "Yes, submit",
                 cancelLabel: "Cancel",
               });
@@ -1521,7 +1611,7 @@ function ReviewSection({
               }
             }}
           >
-            {busy ? "Please wait…" : "Submit Application"}
+            {busy ? "Please wait…" : `Submit · ${categoryTitle}`}
           </button>
         )}
       </div>
