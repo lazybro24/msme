@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 
 type ConfirmOptions = {
   title?: string;
@@ -57,25 +58,24 @@ export function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  useBodyScrollLock(true);
+
   useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onCancel();
       if (e.key === "Enter") onConfirm();
     }
     window.addEventListener("keydown", onKey);
-    return () => {
-      document.body.style.overflow = prev;
-      window.removeEventListener("keydown", onKey);
-    };
+    return () => window.removeEventListener("keydown", onKey);
   }, [onCancel, onConfirm]);
 
   return (
     <div
-      className="fixed inset-0 z-[150] flex items-center justify-center bg-[#1a1814]/45 p-4 backdrop-blur-[2px]"
+      className="fixed inset-0 z-[150] flex items-center justify-center overflow-y-auto overscroll-none bg-[#1a1814]/45 p-4 backdrop-blur-[2px]"
       role="presentation"
       onClick={onCancel}
+      onWheel={(e) => e.preventDefault()}
+      onTouchMove={(e) => e.preventDefault()}
     >
       <div
         role="alertdialog"

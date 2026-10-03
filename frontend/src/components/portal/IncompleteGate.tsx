@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 
 /** Mark empty required controls with a red border. Returns count of incomplete. */
 export function markIncompleteFields(root: HTMLElement | null): number {
@@ -58,22 +59,26 @@ export function IncompleteGateDialog({
   title?: string;
   message?: string;
 }) {
+  useBodyScrollLock(open);
+
   useEffect(() => {
     if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [open]);
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onStay();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onStay]);
 
   if (!open) return null;
 
   return (
     <div
-      className="fixed inset-0 z-[130] flex items-center justify-center bg-[#1a1814]/45 p-4 backdrop-blur-[2px]"
+      className="fixed inset-0 z-[130] flex items-center justify-center overflow-y-auto overscroll-none bg-[#1a1814]/45 p-4 backdrop-blur-[2px]"
       role="presentation"
       onClick={onStay}
+      onWheel={(e) => e.preventDefault()}
+      onTouchMove={(e) => e.preventDefault()}
     >
       <div
         role="alertdialog"

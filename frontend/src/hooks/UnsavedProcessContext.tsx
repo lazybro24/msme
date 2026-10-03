@@ -11,6 +11,7 @@ import {
 } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { clearSession } from "@/lib/api";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 
 type GuardApi = {
   getDirty: () => boolean;
@@ -55,6 +56,7 @@ export function UnsavedProcessProvider({ children }: { children: ReactNode }) {
   const bypassRef = useRef(false);
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  useBodyScrollLock(Boolean(pendingHref));
 
   const register = useCallback((api: GuardApi) => {
     apiRef.current = api;
@@ -157,9 +159,11 @@ export function UnsavedProcessProvider({ children }: { children: ReactNode }) {
       {children}
       {pendingHref && (
         <div
-          className="fixed inset-0 z-[140] flex items-center justify-center bg-[#1a1814]/45 p-4 backdrop-blur-[2px]"
+          className="fixed inset-0 z-[140] flex items-center justify-center overflow-y-auto overscroll-none bg-[#1a1814]/45 p-4 backdrop-blur-[2px]"
           role="presentation"
           onClick={() => !saving && setPendingHref(null)}
+          onWheel={(e) => e.preventDefault()}
+          onTouchMove={(e) => e.preventDefault()}
         >
           <div
             role="alertdialog"

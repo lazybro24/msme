@@ -7,6 +7,8 @@ import { applicantNav, PortalShell } from "@/components/portal/PortalShell";
 import { AuthGate } from "@/components/portal/AuthGate";
 import { IncompleteGateDialog } from "@/components/portal/IncompleteGate";
 import { useUnsavedProcessGuard } from "@/hooks/UnsavedProcessContext";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
+import { ProcessOverlay } from "@/components/ui/ProcessOverlay";
 import { apiDelete, apiGet, getToken, getStoredUser, API_URL } from "@/lib/api";
 import { authFileUrl } from "@/lib/files";
 
@@ -187,8 +189,7 @@ function DocumentsInner() {
         description: `Mandatory · ${name}`,
         file,
       });
-      setMsg(`${name} uploaded.`);
-      load();
+      await load();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Upload failed");
     } finally {
@@ -220,9 +221,8 @@ function DocumentsInner() {
         visibility: String(fd.get("visibility") || "Confidential"),
         file,
       });
-      setMsg("Document uploaded.");
       form.reset();
-      load();
+      await load();
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Upload failed");
     } finally {
@@ -242,6 +242,8 @@ function DocumentsInner() {
 
   const allMandatoryDone = completeCount >= mandatory.length && mandatory.length > 0;
   const missingMandatory = mandatory.filter((m) => !m.done);
+  const uploading = Boolean(busyName) || extraBusy;
+  useBodyScrollLock(Boolean(sizeAlert) || uploading);
 
   const { allowNextNavigation } = useUnsavedProcessGuard({
     dirty: Boolean(categoryReady) && !allMandatoryDone && !loading,
@@ -276,11 +278,19 @@ function DocumentsInner() {
         onStay={() => setIncompleteOpen(false)}
       />
 
+      <ProcessOverlay
+        open={uploading}
+        title="Saving document…"
+        message="Uploading and saving this file to the database. Please wait."
+      />
+
       {sizeAlert && (
         <div
-          className="fixed inset-0 z-[120] flex items-center justify-center bg-[#1a1814]/45 p-4 backdrop-blur-[2px]"
+          className="fixed inset-0 z-[120] flex items-center justify-center overflow-y-auto overscroll-none bg-[#1a1814]/45 p-4 backdrop-blur-[2px]"
           role="presentation"
           onClick={() => setSizeAlert(null)}
+          onWheel={(e) => e.preventDefault()}
+          onTouchMove={(e) => e.preventDefault()}
         >
           <div
             role="alertdialog"
@@ -339,12 +349,12 @@ function DocumentsInner() {
               className="btn-primary shrink-0 self-center sm:self-auto"
               onClick={tryContinue}
             >
-              Continue to Review & Submit →
+              Continue to nomination form →
             </button>
           </div>
 
           {msg && (
-            <p className="mt-4 border border-[#e8a914]/30 bg-[#faf6eb] px-4 py-3 text-sm text-[#1a1814]">
+            <p className="mt-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
               {msg}
             </p>
           )}

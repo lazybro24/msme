@@ -25,6 +25,8 @@ import {
   missingNominationFields,
 } from "@/lib/nominationCompleteness";
 import { useRouter } from "next/navigation";
+import { ProcessOverlay } from "@/components/ui/ProcessOverlay";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 
 type Answers = Record<string, string>;
 
@@ -864,6 +866,7 @@ function EvidenceSection({
   const [sizeAlert, setSizeAlert] = useState<string | null>(null);
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const uploadRef = useRef<HTMLInputElement | null>(null);
+  useBodyScrollLock(Boolean(sizeAlert) || Boolean(busyKey));
 
   function load() {
     apiGet<{
@@ -954,7 +957,6 @@ function EvidenceSection({
     setMsg("");
     try {
       await uploadFile({ name, evidenceType, file });
-      setMsg(`${name} updated.`);
       onChanged?.();
       load();
     } catch (e) {
@@ -966,11 +968,18 @@ function EvidenceSection({
 
   return (
     <div className="mt-4 space-y-4">
+      <ProcessOverlay
+        open={Boolean(busyKey)}
+        title="Saving document…"
+        message="Uploading and saving this file to the database. Please wait."
+      />
       {sizeAlert && (
         <div
-          className="fixed inset-0 z-[120] flex items-center justify-center bg-[#1a1814]/45 p-4 backdrop-blur-[2px]"
+          className="fixed inset-0 z-[120] flex items-center justify-center overflow-y-auto overscroll-none bg-[#1a1814]/45 p-4 backdrop-blur-[2px]"
           role="presentation"
           onClick={() => setSizeAlert(null)}
+          onWheel={(e) => e.preventDefault()}
+          onTouchMove={(e) => e.preventDefault()}
         >
           <div
             role="alertdialog"
@@ -1194,6 +1203,7 @@ function ReviewSection({
   const [error, setError] = useState("");
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [docs, setDocs] = useState<{ name: string; fileName?: string | null }[]>([]);
+  useBodyScrollLock(successOpen);
 
   useEffect(() => {
     apiGet<{ profile: BusinessProfile | null }>("/api/profile")
@@ -1478,33 +1488,20 @@ function ReviewSection({
       </div>
 
       {busy && (
-        <div
-          className="fixed inset-0 z-[160] flex items-center justify-center bg-[#1a1814]/50 p-4 backdrop-blur-[2px]"
-          role="alertdialog"
-          aria-busy="true"
-          aria-live="polite"
-        >
-          <div className="w-full max-w-sm border border-[#e8a914]/35 bg-white p-6 text-center shadow-[0_24px_60px_-20px_rgba(26,24,20,0.55)]">
-            <div
-              className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-[#e8a914] border-t-transparent"
-              aria-hidden
-            />
-            <p className="mt-4 font-display text-lg font-black italic uppercase text-[#1a1814]">
-              Saving…
-            </p>
-            <p className="mt-2 text-sm text-[#555]">
-              {loaderMsg || "Please wait while we store your submission."}
-            </p>
-            <p className="mt-3 text-xs text-[#888]">Do not close this window.</p>
-          </div>
-        </div>
+        <ProcessOverlay
+          open={busy}
+          title="Saving…"
+          message={loaderMsg || "Please wait while we store your submission in the database."}
+        />
       )}
 
       {successOpen && (
         <div
-          className="fixed inset-0 z-[160] flex items-center justify-center bg-[#1a1814]/45 p-4 backdrop-blur-[2px]"
+          className="fixed inset-0 z-[160] flex items-center justify-center overflow-y-auto overscroll-none bg-[#1a1814]/45 p-4 backdrop-blur-[2px]"
           role="presentation"
           onClick={() => setSuccessOpen(false)}
+          onWheel={(e) => e.preventDefault()}
+          onTouchMove={(e) => e.preventDefault()}
         >
           <div
             role="alertdialog"
