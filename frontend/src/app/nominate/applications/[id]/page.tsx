@@ -857,9 +857,7 @@ function PerformanceSection({ answers }: { answers: Answers }) {
               <th className="py-2 pr-4">Metric</th>
               <th className="py-2 pr-4">FY-3</th>
               <th className="py-2 pr-4">FY-2</th>
-              <th className="py-2">
-                FY-1 <span className="text-[#1a1814]">*</span>
-              </th>
+              <th className="py-2">FY-1</th>
             </tr>
           </thead>
           <tbody>
