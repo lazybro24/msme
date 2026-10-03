@@ -20,6 +20,11 @@ import { getCategoryBySlug, awardCategories } from "@/content/awards";
 import { apiGet, apiPatch, apiPost, API_URL, getToken } from "@/lib/api";
 import { useUnsavedProcessGuard } from "@/hooks/UnsavedProcessContext";
 import type { BusinessProfile } from "@/app/nominate/profile/page";
+import {
+  firstIncompleteStep,
+  missingNominationFields,
+} from "@/lib/nominationCompleteness";
+import { useRouter } from "next/navigation";
 
 type Answers = Record<string, string>;
 
@@ -40,6 +45,7 @@ function WorkspaceInner({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const router = useRouter();
   const code = id.split("-")[1] ?? "MFG";
   const byCode = awardCategories.find((c) => c.code === code);
   const [appMeta, setAppMeta] = useState({
@@ -49,6 +55,7 @@ function WorkspaceInner({
     status: "DRAFT",
   });
   const [loading, setLoading] = useState(true);
+  const [docsGateChecked, setDocsGateChecked] = useState(false);
   const category = getCategoryBySlug(appMeta.categorySlug) ?? byCode;
   const scorecard = category?.criteria ?? [];
   const [step, setStep] = useState(1);
@@ -69,6 +76,11 @@ function WorkspaceInner({
     () => Math.round((step / applicationSteps.length) * 100),
     [step],
   );
+  const maxReachableStep = useMemo(() => {
+    const firstBad = firstIncompleteStep(answers, scorecard.length);
+    // Allow current incomplete step + completed ones; never jump ahead of first gap.
+    return Math.min(applicationSteps.length, Math.max(1, firstBad));
+  }, [answers, scorecard.length]);
 
   useEffect(() => {
     answersRef.current = answers;
@@ -82,32 +94,67 @@ function WorkspaceInner({
   });
 
   useEffect(() => {
-    apiGet<{
-      application: {
-        applicationId: string;
-        categorySlug: string;
-        categoryTitle: string;
-        status: string;
-        draftJson?: { step?: number; answers?: Answers };
-      };
-    }>(`/api/applications/${id}`)
-      .then((d) => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const d = await apiGet<{
+          application: {
+            applicationId: string;
+            categorySlug: string;
+            categoryTitle: string;
+            status: string;
+            draftJson?: { step?: number; answers?: Answers };
+          };
+        }>(`/api/applications/${id}`);
+        if (cancelled) return;
+
+        const statusRaw = d.application.status;
         setAppMeta({
           id: d.application.applicationId,
           categorySlug: d.application.categorySlug,
           categoryTitle: d.application.categoryTitle,
-          status: d.application.status.replaceAll("_", " "),
+          status: statusRaw.replaceAll("_", " "),
         });
+
+        if (statusRaw === "DRAFT") {
+          const docs = await apiGet<{ completeCount: number; totalMandatory: number }>(
+            "/api/documents",
+          );
+          if (cancelled) return;
+          if (docs.totalMandatory > 0 && docs.completeCount < docs.totalMandatory) {
+            router.replace("/nominate/documents");
+            return;
+          }
+        }
+
         const draft = d.application.draftJson;
-        if (draft?.answers && typeof draft.answers === "object") {
-          setAnswers(draft.answers);
+        const loadedAnswers =
+          draft?.answers && typeof draft.answers === "object" ? draft.answers : {};
+        setAnswers(loadedAnswers);
+        const cat =
+          getCategoryBySlug(d.application.categorySlug) ||
+          awardCategories.find((c) => c.slug === d.application.categorySlug);
+        const qCount = cat?.criteria?.length ?? scorecard.length;
+        const resume = firstIncompleteStep(loadedAnswers, qCount);
+        const draftStep =
+          typeof draft?.step === "number" && draft.step >= 1 && draft.step <= applicationSteps.length
+            ? draft.step
+            : 1;
+        // Never resume past the first incomplete section
+        setStep(Math.min(draftStep, resume));
+      } catch {
+        /* ignore */
+      } finally {
+        if (!cancelled) {
+          setDocsGateChecked(true);
+          setLoading(false);
         }
-        if (typeof draft?.step === "number" && draft.step >= 1 && draft.step <= applicationSteps.length) {
-          setStep(draft.step);
-        }
-      })
-      .catch(() => undefined)
-      .finally(() => setLoading(false));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   function collectStepAnswers(): Answers {
@@ -246,10 +293,26 @@ function WorkspaceInner({
   }
 
   function tryGoToStep(target: number) {
+    if (target === step) return;
     const partial = collectStepAnswers();
     const merged = mergeAnswers(partial);
-    // Going forward requires current step mandatory fields
-    if (target > step && !assertStepComplete()) return;
+
+    // Always allow going back
+    if (target < step) {
+      setStep(target);
+      void saveDraft(merged, target);
+      return;
+    }
+
+    // Forward: only one step at a time, and current must be complete
+    if (target > step + 1 || target > maxReachableStep) {
+      setIncompleteBanner(
+        "Please complete each section in order. Use Continue after filling required fields.",
+      );
+      setIncompleteOpen(true);
+      return;
+    }
+    if (!assertStepComplete()) return;
     setStep(target);
     void saveDraft(merged, target);
   }
@@ -314,8 +377,9 @@ function WorkspaceInner({
             }}
           >
             {applicationSteps.map((s) => (
-              <option key={s.id} value={s.id}>
+              <option key={s.id} value={s.id} disabled={s.id > maxReachableStep}>
                 {String(s.id).padStart(2, "0")} — {s.label}
+                {s.id > maxReachableStep ? " (complete earlier steps first)" : ""}
               </option>
             ))}
           </select>
@@ -333,10 +397,13 @@ function WorkspaceInner({
                 key={s.id}
                 type="button"
                 onClick={() => tryGoToStep(s.id)}
+                disabled={s.id > maxReachableStep}
                 className={`flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm font-semibold ${
                   step === s.id
                     ? "bg-black text-white"
-                    : "text-[#333] hover:bg-black/5"
+                    : s.id > maxReachableStep
+                      ? "cursor-not-allowed text-[#bbb]"
+                      : "text-[#333] hover:bg-black/5"
                 }`}
               >
                 <span
@@ -1349,9 +1416,40 @@ function ReviewSection({
               if (!ok) return;
               setBusy(true);
               setError("");
-              setLoaderMsg("Saving your form details and documents to the database…");
+              setLoaderMsg("Checking your answers and documents…");
               try {
                 const draftJson = await buildSubmitPayload();
+                const missing = missingNominationFields(
+                  draftJson.answers || {},
+                  scorecard.length,
+                );
+                if (missing.length) {
+                  setError(
+                    `Please complete all sections before submit. Still missing: ${missing.slice(0, 5).join(", ")}${missing.length > 5 ? "…" : ""}`,
+                  );
+                  setBusy(false);
+                  setLoaderMsg("");
+                  return;
+                }
+                const docsCheck = await apiGet<{
+                  completeCount: number;
+                  totalMandatory: number;
+                  mandatory: { name: string; done: boolean }[];
+                }>("/api/documents");
+                if (
+                  docsCheck.totalMandatory > 0 &&
+                  docsCheck.completeCount < docsCheck.totalMandatory
+                ) {
+                  const pending = (docsCheck.mandatory || [])
+                    .filter((m) => !m.done)
+                    .map((m) => m.name);
+                  setError(
+                    `Upload all mandatory documents first (${docsCheck.completeCount}/${docsCheck.totalMandatory}). Missing: ${pending.join(", ")}`,
+                  );
+                  setBusy(false);
+                  setLoaderMsg("");
+                  return;
+                }
                 setLoaderMsg("Confirming submission in the database…");
                 const res = await apiPost<{ application: { status: string } }>(
                   `/api/applications/${applicationId}/submit`,

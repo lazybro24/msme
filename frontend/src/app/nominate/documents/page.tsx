@@ -328,6 +328,11 @@ function DocumentsInner() {
                 Upload mandatory proof documents (max {MAX_UPLOAD_MB} MB each). These appear to jury
                 under Supporting Evidence after verification.
               </p>
+              <p className="mt-2 text-xs text-[#666]">
+                Tip: If you are not GST-registered, upload a short signed note stating that under
+                <span className="font-semibold"> GST Certificate</span>. Keep Udyam and PAN ready —
+                those are always required.
+              </p>
             </div>
             <button
               type="button"

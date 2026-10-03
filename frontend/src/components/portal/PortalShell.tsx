@@ -21,7 +21,7 @@ export const applicantNav = [
   { href: "/nominate/profile", label: "2. Details" },
   { href: "/nominate/categories", label: "3. Category" },
   { href: "/nominate/documents", label: "4. Documents" },
-  { href: "/nominate/applications", label: "5. Review & Submit" },
+  { href: "/nominate/applications", label: "5. Nomination form" },
   { href: "/nominate/messages", label: "Messages" },
   { href: "/nominate/help", label: "Help" },
 ] as const;
@@ -93,7 +93,7 @@ function ApplicantNavLinks({
     "2. Details": "/nominate/profile",
     "3. Category": "/nominate/categories",
     "4. Documents": "/nominate/documents",
-    "5. Review & Submit": reviewHref,
+    "5. Nomination form": reviewHref,
   };
 
   const utilityLabels = new Set(["Messages", "Finalist Profile", "Help"]);
@@ -104,7 +104,7 @@ function ApplicantNavLinks({
         const href = stepHrefByLabel[item.label] ?? item.href;
         const isUtility = utilityLabels.has(item.label);
         const allowed =
-          item.label === "5. Review & Submit"
+          item.label === "5. Nomination form"
             ? canAccess("/nominate/applications")
             : canAccess(href);
         const active =

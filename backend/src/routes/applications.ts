@@ -392,7 +392,32 @@ applicationsRouter.post("/:applicationId/submit", requireAuth, async (req: AuthR
   const draftJson =
     req.body?.draftJson !== undefined && req.body?.draftJson !== null
       ? (req.body.draftJson as object)
-      : undefined;
+      : (app.draftJson as object | null) || undefined;
+
+  const answers =
+    draftJson && typeof draftJson === "object" && "answers" in draftJson
+      ? ((draftJson as { answers?: Record<string, unknown> }).answers || {})
+      : {};
+
+  const { missingNominationFields, categoryQuestionCount } = await import(
+    "../lib/nominationCompleteness"
+  );
+  const missingAnswers = missingNominationFields(answers, categoryQuestionCount(app.categoryCode));
+  if (missingAnswers.length) {
+    return res.status(400).json({
+      error: `Please complete all nomination sections before submit. Missing: ${missingAnswers.slice(0, 6).join(", ")}${missingAnswers.length > 6 ? "…" : ""}`,
+      missing: missingAnswers,
+    });
+  }
+
+  const { getMandatoryDocumentStatus } = await import("../lib/documentChecks");
+  const docsStatus = await getMandatoryDocumentStatus(app.applicantId, app.id);
+  if (!docsStatus.complete) {
+    return res.status(400).json({
+      error: `Upload all mandatory documents before submit (${docsStatus.completeCount}/${docsStatus.total}). Missing: ${docsStatus.missing.join(", ")}`,
+      missingDocuments: docsStatus.missing,
+    });
+  }
 
   // Persist final answers + document snapshot before flipping status
   if (draftJson && app.organisationId) {
@@ -428,16 +453,8 @@ applicationsRouter.post("/:applicationId/submit", requireAuth, async (req: AuthR
     afterJson: {
       status: updated.status,
       answersStored: Boolean(draftJson),
-      answerKeys:
-        draftJson && typeof draftJson === "object" && "answers" in draftJson
-          ? Object.keys((draftJson as { answers?: object }).answers || {})
-          : [],
-      documentCount:
-        draftJson && typeof draftJson === "object" && "documents" in draftJson
-          ? Array.isArray((draftJson as { documents?: unknown[] }).documents)
-            ? (draftJson as { documents: unknown[] }).documents.length
-            : 0
-          : undefined,
+      answerKeys: Object.keys(answers),
+      documentCount: docsStatus.completeCount,
     },
   });
   await notify(
@@ -459,7 +476,7 @@ applicationsRouter.post("/:applicationId/submit", requireAuth, async (req: AuthR
     ),
   );
 
-  res.json({ application: appToApi(updated) });
+  res.json({ application: appToApi(updated), message: "Submitted for eligibility review" });
 });
 
 async function juryForCategory(categoryCode: string) {

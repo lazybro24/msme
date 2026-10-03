@@ -45,15 +45,29 @@ function decisionLabel(app: App) {
       body: "Admin verified your nomination. Independent jury evaluation is in progress.",
     };
   }
+  if (app.status === "CLARIFICATION_REQUIRED") {
+    return {
+      tone: "wait" as const,
+      title: "Action needed — clarification",
+      body: "The secretariat asked for more information. Open Messages to reply and upload what’s requested.",
+    };
+  }
   if (
-    ["ELIGIBILITY_REVIEW", "SUBMITTED", "VERIFICATION", "CLARIFICATION_REQUIRED", "READY_FOR_JURY"].includes(
-      app.status,
-    )
+    ["ELIGIBILITY_REVIEW", "SUBMITTED", "VERIFICATION", "READY_FOR_JURY"].includes(app.status)
   ) {
     return {
       tone: "wait" as const,
       title: "Awaiting Admin verification",
       body: "Your nomination is with Admin. It will appear to the jury only after verification.",
+    };
+  }
+  if (app.status === "NOT_QUALIFIED") {
+    return {
+      tone: "reject" as const,
+      title: "We are not proceeding with this application",
+      body:
+        app.rejectionReason ||
+        "The Awards Secretariat is not proceeding with this nomination.",
     };
   }
   return null;
@@ -210,9 +224,9 @@ function DashboardInner() {
     },
     {
       id: 5,
-      label: "5. Review & Submit",
-      title: "Reverify and submit",
-      body: "Review answers, confirm declarations, then submit for admin verification.",
+      label: "5. Nomination form",
+      title: "Complete nomination form",
+      body: "Answer each section in order, then review and submit for verification.",
       href: reviewHref,
       done: submitDone,
       locked: !profileDone || !categoryDone || !documentsDone,
@@ -224,7 +238,7 @@ function DashboardInner() {
   const nextHref = currentStep.href;
   const nextLabel = currentStep.current
     ? currentStep.id === 5
-      ? "Review & Submit"
+      ? "Continue nomination form"
       : `Continue · ${currentStep.title}`
     : submitDone
       ? "Open Application"
@@ -247,7 +261,7 @@ function DashboardInner() {
             Dashboard
           </h1>
           <p className="mt-2 text-sm text-[#666]">
-            Account → Fill details → Select category → Upload documents → Reverify & submit
+            Account → Business details → Category → Documents → Nomination form → Submit
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -374,6 +388,11 @@ function DashboardInner() {
                             {decision.title}
                           </p>
                           <p className="mt-1">{decision.body}</p>
+                          {app.status === "CLARIFICATION_REQUIRED" && (
+                            <Link href="/nominate/messages" className="mt-2 inline-block font-semibold underline">
+                              Go to Messages
+                            </Link>
+                          )}
                         </div>
                       )}
                       {decision?.tone === "ok" && (
@@ -401,10 +420,20 @@ function DashboardInner() {
                             </Link>
                           )}
                           <Link
-                            href={`/nominate/applications/${app.applicationId}`}
+                            href={
+                              !docsReady && app.status === "DRAFT"
+                                ? "/nominate/documents"
+                                : `/nominate/applications/${app.applicationId}`
+                            }
                             className={docsReady || app.status !== "DRAFT" ? "btn-secondary" : "btn-ghost"}
                           >
-                            {app.status === "DRAFT" ? "Continue & Submit" : "Open Workspace"}
+                            {app.status === "DRAFT"
+                              ? docsReady
+                                ? "Continue nomination form"
+                                : "Finish documents first"
+                              : app.status === "CLARIFICATION_REQUIRED"
+                                ? "Open Messages / application"
+                                : "View application"}
                           </Link>
                         </div>
                         {canDeleteApp(app) && (

@@ -165,6 +165,11 @@ export function AuthLoginForm({
         <p className="mt-4 text-center text-xs text-[#888]">
           Sign in with email and password. If MFA is enabled, Google Authenticator is required too.
         </p>
+        <p className="mt-3 text-center text-sm">
+          <Link href="/nominate/register" className="font-semibold hover:underline">
+            New applicant? Create an account
+          </Link>
+        </p>
       </div>
     </div>
   );
