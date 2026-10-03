@@ -245,13 +245,18 @@ function WorkspaceInner({
 
   async function buildSubmitPayload() {
     const partial = collectStepAnswers();
-    const merged = mergeAnswers(partial);
+    const submittedAt = new Date();
+    const merged = mergeAnswers({
+      ...partial,
+      decl_date: formatSystemDateTime(submittedAt),
+      decl_datetime: submittedAt.toISOString(),
+    });
     const documents = await fetchDocumentSnapshot();
     return {
       step: applicationSteps.length,
       answers: merged,
       documents,
-      savedAt: new Date().toISOString(),
+      savedAt: submittedAt.toISOString(),
       submittedFromReview: true,
     };
   }
@@ -1285,6 +1290,41 @@ function EvidenceSection({
   );
 }
 
+function formatSystemDateTime(d = new Date()) {
+  return d.toLocaleString(undefined, {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function SystemDateTimeDisplay({ label = "Date & time" }: { label?: string }) {
+  const [now, setNow] = useState(() => formatSystemDateTime());
+
+  useEffect(() => {
+    const tick = () => setNow(formatSystemDateTime());
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  return (
+    <div>
+      <p className="label">{label}</p>
+      <div className="border border-black/10 bg-[#f7f4f2] px-3 py-3 text-sm font-semibold text-[#1a1814]">
+        {now}
+      </div>
+      <p className="mt-1 text-xs text-[#666]">
+        Shown from this device. Exact date and time are captured automatically when you submit.
+      </p>
+    </div>
+  );
+}
+
 function DeclarationSection({ answers }: { answers: Answers }) {
   const items = [
     "Information provided is accurate to the best of my knowledge.",
@@ -1358,19 +1398,7 @@ function DeclarationSection({ answers }: { answers: Answers }) {
             defaultValue={answers.decl_place || ""}
           />
         </div>
-        <div>
-          <label className="label" htmlFor="decl_date">
-            Date *
-          </label>
-          <input
-            id="decl_date"
-            name="decl_date"
-            className="input"
-            type="date"
-            defaultValue={answers.decl_date || ""}
-            required
-          />
-        </div>
+        <SystemDateTimeDisplay label="Date & time (system)" />
       </div>
     </div>
   );
@@ -1609,7 +1637,10 @@ function ReviewSection({
                 ["Authorized Signatory", answers.decl_signatory],
                 ["Designation", answers.decl_designation],
                 ["Place", answers.decl_place],
-                ["Date", answers.decl_date],
+                [
+                  "Date & time",
+                  answers.decl_date || "Captured automatically on submit",
+                ],
               ]}
             />
           </SheetSection>

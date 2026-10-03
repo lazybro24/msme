@@ -42,7 +42,6 @@ export function missingNominationFields(
   if (!filled(answers, "mysuru_contribution")) missing.push("Mysuru contribution");
   if (!filled(answers, "signature_achievement")) missing.push("Signature achievement");
   if (!filled(answers, "decl_signatory")) missing.push("Declaration signatory");
-  if (!filled(answers, "decl_date")) missing.push("Declaration date");
   if (!yes(answers, "decl_agree")) missing.push("Declaration agreement");
 
   return missing;
@@ -61,11 +60,7 @@ export function firstIncompleteStep(
   if (!filled(answers, "category_q_0")) return 5;
   if (!filled(answers, "mysuru_contribution")) return 6;
   if (!filled(answers, "signature_achievement")) return 7;
-  if (
-    !filled(answers, "decl_signatory") ||
-    !filled(answers, "decl_date") ||
-    !yes(answers, "decl_agree")
-  ) {
+  if (!filled(answers, "decl_signatory") || !yes(answers, "decl_agree")) {
     return 9;
   }
   return 10;
