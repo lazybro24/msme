@@ -110,6 +110,12 @@ function DocumentsInner() {
 
   function assertFileSize(file: File | null): file is File {
     if (!file) return false;
+    const name = file.name.toLowerCase();
+    const isPdf = file.type === "application/pdf" || name.endsWith(".pdf");
+    if (!isPdf) {
+      setSizeAlert("Only PDF format is supported. Please upload a .pdf file.");
+      return false;
+    }
     if (file.size > MAX_UPLOAD_BYTES) {
       setSizeAlert(
         `Your file is ${formatMb(file.size)} MB. It should be less than ${MAX_UPLOAD_MB} MB.`,
@@ -391,12 +397,11 @@ function DocumentsInner() {
             <div className="text-center sm:text-left">
               <h1 className="font-display text-3xl font-black italic uppercase">Documents</h1>
               <p className="mt-2 text-sm text-[#666]">
-                For each document: upload the file if you have it. If it is not available, mark{" "}
-                <span className="font-semibold">N/A</span> instead.
+                Upload PDF proof documents only (max {MAX_UPLOAD_MB} MB each). If a document is not
+                available, mark <span className="font-semibold">N/A</span>.
               </p>
               <p className="mt-2 text-xs text-[#666]">
-                Tip: Prefer uploading Udyam and PAN when you can — use N/A only when you truly cannot
-                provide a document.
+                Only PDF format is supported. Prefer uploading Udyam and PAN when you can.
               </p>
             </div>
             <button
@@ -495,7 +500,7 @@ function DocumentsInner() {
                                 fileRefs.current[m.name] = el;
                               }}
                               type="file"
-                              accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                              accept=".pdf,application/pdf"
                               className="sr-only"
                               disabled={busyName === m.name}
                               onChange={(e) => {
@@ -561,7 +566,7 @@ function DocumentsInner() {
                     className="input"
                     type="file"
                     name="file"
-                    accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                    accept=".pdf,application/pdf"
                     required
                   />
                 </div>

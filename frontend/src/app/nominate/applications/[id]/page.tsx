@@ -184,11 +184,15 @@ function WorkspaceInner({
     root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
       "input[name], textarea[name], select[name]",
     ).forEach((el) => {
-      if (el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio")) {
-        next[el.name] = el.checked ? "yes" : "";
-      } else {
-        next[el.name] = String(el.value || "");
+      if (el instanceof HTMLInputElement && el.type === "radio") {
+        if (el.checked) next[el.name] = el.value || "yes";
+        return;
       }
+      if (el instanceof HTMLInputElement && el.type === "checkbox") {
+        next[el.name] = el.checked ? "yes" : "";
+        return;
+      }
+      next[el.name] = String(el.value || "");
     });
     return next;
   }
@@ -712,25 +716,72 @@ function EligibilityStep({ answers }: { answers: Answers }) {
     "Business currently operational",
     "Willing to provide documentary evidence",
   ];
+  const [choices, setChoices] = useState<Record<number, string>>(() => {
+    const init: Record<number, string> = {};
+    items.forEach((_, i) => {
+      const v = String(answers[`eligibility_${i}`] || "").toLowerCase();
+      init[i] = v === "yes" || v === "no" ? v : "";
+    });
+    return init;
+  });
+
   return (
     <div className="mt-4 space-y-4">
       <p className="text-sm text-[#666]">
-        Confirm common eligibility before category questions. This does not replace documentary
-        verification.
+        Confirm common eligibility before category questions. Select Yes or No for each. If you
+        select No, a reason is required.
       </p>
       {items.map((q, i) => {
         const name = `eligibility_${i}`;
+        const reasonName = `eligibility_${i}_reason`;
+        const choice = choices[i] || "";
         return (
-          <label key={q} className="flex items-center gap-3 border border-black/10 px-3 py-3 text-sm">
-            <input
-              type="checkbox"
-              name={name}
-              required
-              defaultChecked={answers[name] === "yes"}
-              className="h-4 w-4"
-            />
-            {q} *
-          </label>
+          <div key={q} className="border border-black/10 px-3 py-3 text-sm">
+            <p className="font-medium text-[#1a1814]">
+              {q} <span className="text-[#888]">*</span>
+            </p>
+            <div className="mt-3 flex flex-wrap gap-4">
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="radio"
+                  name={name}
+                  value="yes"
+                  required
+                  checked={choice === "yes"}
+                  onChange={() => setChoices((c) => ({ ...c, [i]: "yes" }))}
+                  className="h-4 w-4"
+                />
+                Yes
+              </label>
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="radio"
+                  name={name}
+                  value="no"
+                  required
+                  checked={choice === "no"}
+                  onChange={() => setChoices((c) => ({ ...c, [i]: "no" }))}
+                  className="h-4 w-4"
+                />
+                No
+              </label>
+            </div>
+            {choice === "no" && (
+              <div className="mt-3">
+                <label className="label" htmlFor={reasonName}>
+                  Reason * (required when No)
+                </label>
+                <textarea
+                  id={reasonName}
+                  name={reasonName}
+                  className="input min-h-20"
+                  required
+                  defaultValue={answers[reasonName] || ""}
+                  placeholder="Explain why this does not apply / is not available"
+                />
+              </div>
+            )}
+          </div>
         );
       })}
     </div>
@@ -795,7 +846,9 @@ function PerformanceSection({ answers }: { answers: Answers }) {
         Confidential — Jury & Verification Use Only
       </div>
       <p className="mb-3 text-sm text-[#666]">
-        Only the latest year (FY-1) for Revenue is required. Fill other cells if you have them.
+        Fields marked <span className="font-semibold text-[#1a1814]">*</span> are required. Only{" "}
+        <span className="font-semibold">Revenue · FY-1</span> is mandatory — fill other cells if you
+        have them.
       </p>
       <div className="overflow-x-auto">
         <table className="min-w-[640px] w-full text-left text-sm">
@@ -804,29 +857,47 @@ function PerformanceSection({ answers }: { answers: Answers }) {
               <th className="py-2 pr-4">Metric</th>
               <th className="py-2 pr-4">FY-3</th>
               <th className="py-2 pr-4">FY-2</th>
-              <th className="py-2">FY-1</th>
+              <th className="py-2">
+                FY-1 <span className="text-[#1a1814]">*</span>
+              </th>
             </tr>
           </thead>
           <tbody>
-            {metrics.map((m, mi) => (
-              <tr key={m} className="border-b border-black/5">
-                <td className="py-2 pr-4 font-medium">{m}</td>
-                {[0, 1, 2].map((yi) => {
-                  const name = `perf_m${mi}_y${yi}`;
-                  return (
-                    <td key={yi} className="py-2 pr-4">
-                      <input
-                        className="input"
-                        name={name}
-                        placeholder="—"
-                        defaultValue={answers[name] || ""}
-                        required={yi === 2}
-                      />
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
+            {metrics.map((m, mi) => {
+              const revenueRequired = mi === 0;
+              return (
+                <tr key={m} className="border-b border-black/5">
+                  <td className="py-2 pr-4 font-medium">
+                    {m}
+                    {revenueRequired ? (
+                      <span className="text-[#1a1814]" aria-hidden>
+                        {" "}
+                        *
+                      </span>
+                    ) : null}
+                  </td>
+                  {[0, 1, 2].map((yi) => {
+                    const name = `perf_m${mi}_y${yi}`;
+                    const isRequired = revenueRequired && yi === 2;
+                    return (
+                      <td key={yi} className="py-2 pr-4">
+                        <input
+                          className="input"
+                          name={name}
+                          placeholder="—"
+                          defaultValue={answers[name] || ""}
+                          required={isRequired}
+                          aria-required={isRequired}
+                          aria-label={
+                            isRequired ? `${m} FY-1 (required)` : `${m} FY-${3 - yi}`
+                          }
+                        />
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -1052,6 +1123,11 @@ function EvidenceSection({
       );
       return;
     }
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    if (!isPdf) {
+      setSizeAlert("Only PDF format is supported. Please upload a .pdf file.");
+      return;
+    }
     setBusyKey(key);
     setMsg("");
     try {
@@ -1122,7 +1198,7 @@ function EvidenceSection({
 
       <p className="text-sm text-[#666]">
         Link each claim to a document: Claim → Evidence → Jury Score. Use{" "}
-        <span className="font-semibold">N/A</span> if a document is not available. Max{" "}
+        <span className="font-semibold">N/A</span> if a document is not available. PDF only · max{" "}
         {MAX_UPLOAD_MB} MB per file.
       </p>
       {msg && (
@@ -1168,7 +1244,7 @@ function EvidenceSection({
                     fileRefs.current[key] = el;
                   }}
                   type="file"
-                  accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                  accept=".pdf,application/pdf"
                   className="sr-only"
                   disabled={busy}
                   onChange={(e) => {
@@ -1191,7 +1267,7 @@ function EvidenceSection({
           <input
             ref={uploadRef}
             type="file"
-            accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+            accept=".pdf,application/pdf"
             className="sr-only"
             disabled={busyKey === "__new__"}
             onChange={(e) => {

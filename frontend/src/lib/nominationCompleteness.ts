@@ -13,6 +13,13 @@ function yes(answers: AnswersMap, key: string) {
   return String(answers[key] ?? "").trim().toLowerCase() === "yes";
 }
 
+function eligibilityAnswered(answers: AnswersMap, i: number) {
+  const v = String(answers[`eligibility_${i}`] ?? "").trim().toLowerCase();
+  if (v === "yes") return true;
+  if (v === "no") return filled(answers, `eligibility_${i}_reason`);
+  return false;
+}
+
 /** Human-readable missing fields for submit gate (important fields only). */
 export function missingNominationFields(
   answers: AnswersMap,
@@ -21,7 +28,12 @@ export function missingNominationFields(
   const missing: string[] = [];
 
   for (let i = 0; i < 4; i++) {
-    if (!yes(answers, `eligibility_${i}`)) missing.push(`Eligibility confirmation ${i + 1}`);
+    const v = String(answers[`eligibility_${i}`] ?? "").trim().toLowerCase();
+    if (v !== "yes" && v !== "no") {
+      missing.push(`Eligibility confirmation ${i + 1}`);
+    } else if (v === "no" && !filled(answers, `eligibility_${i}_reason`)) {
+      missing.push(`Eligibility reason ${i + 1}`);
+    }
   }
 
   if (!filled(answers, "overview_describe")) missing.push("Business description");
@@ -42,7 +54,7 @@ export function firstIncompleteStep(
   _categoryQuestionCount: number,
 ): number {
   for (let i = 0; i < 4; i++) {
-    if (!yes(answers, `eligibility_${i}`)) return 2;
+    if (!eligibilityAnswered(answers, i)) return 2;
   }
   if (!filled(answers, "overview_describe")) return 3;
   if (!filled(answers, "perf_m0_y2")) return 4;

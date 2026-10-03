@@ -60,28 +60,18 @@ export const helpAttachmentUpload = multer({
 const docsStorage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, docsDir),
   filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase() || ".bin";
-    const safe = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+    const safe = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.pdf`;
     cb(null, safe);
   },
 });
-
-const DOC_MIME = new Set([
-  "application/pdf",
-  "image/jpeg",
-  "image/jpg",
-  "image/png",
-  "image/webp",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-]);
 
 export const documentUpload = multer({
   storage: docsStorage,
   limits: { fileSize: (Number(process.env.MAX_UPLOAD_MB) || 5) * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    if (!DOC_MIME.has(file.mimetype) && !file.mimetype.startsWith("image/")) {
-      cb(new Error("Allowed: PDF, JPG, PNG, DOC, DOCX"));
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (file.mimetype !== "application/pdf" && ext !== ".pdf") {
+      cb(new Error("Only PDF files are supported"));
       return;
     }
     cb(null, true);

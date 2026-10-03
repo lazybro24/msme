@@ -2,14 +2,23 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { LogOut, Menu, X } from "lucide-react";
-import { apiGet, clearSession, getStoredUser, getToken, setSession, type AuthUser } from "@/lib/api";
+import {
+  apiGet,
+  apiPost,
+  clearSession,
+  getStoredUser,
+  getToken,
+  setSession,
+  type AuthUser,
+} from "@/lib/api";
 import { authFileUrl } from "@/lib/files";
 import { cn } from "@/lib/utils";
 import { NominationProgressProvider, useSharedNominationProgress } from "@/hooks/NominationProgressContext";
 import { UnsavedProcessProvider, useUnsavedProcessOptional } from "@/hooks/UnsavedProcessContext";
 import { ADMIN_BASE, adminHref } from "@/lib/adminPath";
+import { PasswordField } from "@/components/ui/PasswordField";
 
 function userPhotoSrc(url?: string | null) {
   return authFileUrl(url);
@@ -310,6 +319,12 @@ function PortalShellBody({
   const t = themes[variant];
   const [open, setOpen] = useState(false);
   const [headerUser, setHeaderUser] = useState<AuthUser | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [showPwForm, setShowPwForm] = useState(false);
+  const [pwBusy, setPwBusy] = useState(false);
+  const [pwMsg, setPwMsg] = useState("");
+  const [pwError, setPwError] = useState("");
+  const profileRef = useRef<HTMLDivElement>(null);
   const navHrefs = nav.map((n) => n.href);
 
   const loginPath =
@@ -354,21 +369,75 @@ function PortalShellBody({
       });
   }, [variant, pathname]);
 
+  useEffect(() => {
+    setProfileOpen(false);
+    setShowPwForm(false);
+    setPwMsg("");
+    setPwError("");
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!profileOpen) return;
+    function onDoc(e: MouseEvent) {
+      if (!profileRef.current?.contains(e.target as Node)) {
+        setProfileOpen(false);
+        setShowPwForm(false);
+      }
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setProfileOpen(false);
+        setShowPwForm(false);
+      }
+    }
+    document.addEventListener("mousedown", onDoc);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [profileOpen]);
+
   const displayName = headerUser?.fullName || userLabel;
-  const displayMeta = [
-    headerUser?.designation,
-    headerUser?.orgName,
-    headerUser?.mobile,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const accountId = headerUser?.id
+    ? headerUser.id.slice(-8).toUpperCase()
+    : "—";
+
+  async function changePassword(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const currentPassword = String(fd.get("currentPassword") || "");
+    const newPassword = String(fd.get("newPassword") || "");
+    const confirmPassword = String(fd.get("confirmPassword") || "");
+    setPwError("");
+    setPwMsg("");
+    if (newPassword.length < 8) {
+      setPwError("New password must be at least 8 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPwError("New password and confirmation do not match.");
+      return;
+    }
+    setPwBusy(true);
+    try {
+      await apiPost("/api/auth/change-password", { currentPassword, newPassword });
+      setPwMsg("Password updated.");
+      e.currentTarget.reset();
+      setShowPwForm(false);
+    } catch (err) {
+      setPwError(err instanceof Error ? err.message : "Could not update password");
+    } finally {
+      setPwBusy(false);
+    }
+  }
 
   const logoutBtn = (
     <button
       type="button"
       onClick={handleLogout}
       className={cn(
-        "inline-flex min-h-[4.75rem] min-w-[5.5rem] flex-col items-center justify-center gap-2 border px-3.5 text-[10px] font-bold uppercase tracking-[0.1em] transition",
+        "inline-flex h-full min-h-[4.5rem] min-w-[5.25rem] flex-col items-center justify-center gap-1.5 self-stretch border px-3 text-[10px] font-bold uppercase tracking-[0.1em] transition",
         t.menuBtn,
       )}
       title="Logout"
@@ -382,13 +451,114 @@ function PortalShellBody({
     <Link
       href="/contact"
       className={cn(
-        "inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 border px-2.5 text-[10px] font-bold uppercase tracking-[0.1em] transition",
+        "inline-flex min-h-9 w-full items-center justify-center border px-2.5 text-[10px] font-bold uppercase tracking-[0.1em] transition",
         t.menuBtn,
       )}
     >
       Contact
     </Link>
   );
+
+  const profilePopup = profileOpen ? (
+    <div
+      className="absolute right-0 top-[calc(100%+0.4rem)] z-[80] w-[min(100vw-2rem,20rem)] border border-[#e8a914]/45 bg-[#1a1814] p-4 text-left text-white shadow-[0_18px_40px_-16px_rgba(0,0,0,0.65)]"
+      role="dialog"
+      aria-label="Account details"
+    >
+      <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--brand-gold)]">
+        Account
+      </p>
+      <dl className="mt-3 space-y-2.5 text-sm">
+        <div>
+          <dt className="text-[9px] font-bold uppercase tracking-[0.1em] text-white/45">Name</dt>
+          <dd className="mt-0.5 font-semibold">{headerUser?.fullName || displayName}</dd>
+        </div>
+        <div>
+          <dt className="text-[9px] font-bold uppercase tracking-[0.1em] text-white/45">
+            Designation
+          </dt>
+          <dd className="mt-0.5 font-semibold">{headerUser?.designation || "—"}</dd>
+        </div>
+        <div>
+          <dt className="text-[9px] font-bold uppercase tracking-[0.1em] text-white/45">
+            Employee ID
+          </dt>
+          <dd className="mt-0.5 font-semibold tracking-wide">{accountId}</dd>
+        </div>
+        <div>
+          <dt className="text-[9px] font-bold uppercase tracking-[0.1em] text-white/45">Email</dt>
+          <dd className="mt-0.5 break-all font-semibold">{headerUser?.email || "—"}</dd>
+        </div>
+        <div>
+          <dt className="text-[9px] font-bold uppercase tracking-[0.1em] text-white/45">
+            Contact number
+          </dt>
+          <dd className="mt-0.5 font-semibold">{headerUser?.mobile || "—"}</dd>
+        </div>
+        {headerUser?.orgName ? (
+          <div>
+            <dt className="text-[9px] font-bold uppercase tracking-[0.1em] text-white/45">
+              Company
+            </dt>
+            <dd className="mt-0.5 font-semibold">{headerUser.orgName}</dd>
+          </div>
+        ) : null}
+      </dl>
+
+      <div className="mt-4 border-t border-white/15 pt-3">
+        <button
+          type="button"
+          className={cn(
+            "inline-flex min-h-9 w-full items-center justify-center border px-2.5 text-[10px] font-bold uppercase tracking-[0.1em]",
+            t.menuBtn,
+          )}
+          onClick={() => {
+            setShowPwForm((v) => !v);
+            setPwError("");
+            setPwMsg("");
+          }}
+        >
+          {showPwForm ? "Cancel" : "Reset password"}
+        </button>
+        {pwMsg ? <p className="mt-2 text-xs text-[var(--brand-gold)]">{pwMsg}</p> : null}
+        {pwError ? <p className="mt-2 text-xs text-red-300">{pwError}</p> : null}
+        {showPwForm ? (
+          <form className="mt-3 space-y-2" onSubmit={changePassword}>
+            <PasswordField
+              name="currentPassword"
+              placeholder="Current password"
+              required
+              autoComplete="current-password"
+              className="!bg-white !text-[#1a1814]"
+            />
+            <PasswordField
+              name="newPassword"
+              placeholder="New password"
+              required
+              minLength={8}
+              autoComplete="new-password"
+              className="!bg-white !text-[#1a1814]"
+            />
+            <PasswordField
+              name="confirmPassword"
+              placeholder="Confirm new password"
+              required
+              minLength={8}
+              autoComplete="new-password"
+              className="!bg-white !text-[#1a1814]"
+            />
+            <button
+              type="submit"
+              disabled={pwBusy}
+              className="inline-flex min-h-9 w-full items-center justify-center bg-[var(--brand-gold)] px-3 text-[10px] font-bold uppercase tracking-[0.1em] text-[#1a1814] disabled:opacity-50"
+            >
+              {pwBusy ? "Updating…" : "Update password"}
+            </button>
+          </form>
+        ) : null}
+      </div>
+    </div>
+  ) : null;
 
   return (
     <div className={cn("portal-page relative isolate min-h-screen", t.pageBg)}>
@@ -426,88 +596,78 @@ function PortalShellBody({
             <div className={cn("text-xs leading-snug", t.subtitle)}>{subtitle}</div>
           </div>
 
-          <div className="flex shrink-0 items-start gap-2 sm:gap-3">
-            <div className="flex items-stretch gap-2">
-              {variant === "jury" && (
+          <div className="relative flex shrink-0 items-stretch gap-2 sm:gap-2.5" ref={profileRef}>
+            {variant === "jury" && (
+              <Link
+                href="/jury-portal/profile"
+                className={cn(
+                  "flex h-auto min-h-[4.5rem] w-[4.5rem] shrink-0 items-center justify-center self-stretch overflow-hidden border transition hover:opacity-90",
+                  t.menuBtn,
+                )}
+                title="My Profile"
+              >
+                {headerUser?.photoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={userPhotoSrc(headerUser.photoUrl)}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <span className="font-display text-xl font-black italic text-white/90">
+                    {displayName.slice(0, 1)}
+                  </span>
+                )}
+              </Link>
+            )}
+
+            <div className="flex w-[11.5rem] flex-col gap-1.5 sm:w-[13rem]">
+              {variant === "jury" ? (
                 <Link
                   href="/jury-portal/profile"
                   className={cn(
-                    "flex h-[4.75rem] w-[4.75rem] shrink-0 items-center justify-center overflow-hidden border transition hover:opacity-90",
-                    t.menuBtn,
+                    "flex min-h-10 w-full items-center px-2.5 py-2 text-left text-[10px] font-bold uppercase leading-snug tracking-[0.08em] transition hover:opacity-90",
+                    t.userChip,
                   )}
                   title="My Profile"
                 >
-                  {headerUser?.photoUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={userPhotoSrc(headerUser.photoUrl)}
-                      alt=""
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <span className="font-display text-xl font-black italic text-white/90">
-                      {displayName.slice(0, 1)}
-                    </span>
-                  )}
+                  <span className="truncate">{displayName}</span>
                 </Link>
+              ) : (
+                <button
+                  type="button"
+                  className={cn(
+                    "flex min-h-10 w-full items-center px-2.5 py-2 text-left text-[10px] font-bold uppercase leading-snug tracking-[0.08em] transition hover:opacity-90",
+                    t.userChip,
+                    profileOpen && "ring-1 ring-[var(--brand-gold)]",
+                  )}
+                  title="Account details"
+                  aria-expanded={profileOpen}
+                  aria-haspopup="dialog"
+                  onClick={() => setProfileOpen((v) => !v)}
+                >
+                  <span className="truncate">{displayName}</span>
+                </button>
               )}
-              <div className="flex min-w-0 max-w-[14rem] flex-col items-stretch gap-1.5 sm:max-w-[18rem]">
-                {variant === "jury" ? (
-                  <Link
-                    href="/jury-portal/profile"
-                    className={cn(
-                      "w-full px-2.5 py-1.5 text-[10px] font-bold uppercase leading-snug tracking-[0.08em] transition hover:opacity-90",
-                      t.userChip,
-                    )}
-                    title="My Profile"
-                  >
-                    <span className="break-words">{displayName}</span>
-                    {displayMeta ? (
-                      <span className="mt-0.5 block text-[9px] font-medium normal-case tracking-normal text-white/70">
-                        {displayMeta}
-                      </span>
-                    ) : null}
-                  </Link>
-                ) : (
-                  <Link
-                    href={variant === "applicant" ? "/nominate/profile" : "#"}
-                    className={cn(
-                      "w-full px-2.5 py-1.5 text-[10px] font-bold uppercase leading-snug tracking-[0.08em] transition hover:opacity-90",
-                      t.userChip,
-                    )}
-                    title="Account profile"
-                    onClick={(e) => {
-                      if (variant !== "applicant") e.preventDefault();
-                    }}
-                  >
-                    <span className="break-words">{displayName}</span>
-                    {displayMeta ? (
-                      <span className="mt-0.5 block text-[9px] font-medium normal-case tracking-normal text-white/70">
-                        {displayMeta}
-                      </span>
-                    ) : null}
-                  </Link>
-                )}
-                {/* Contact under profile; Logout is the tall action on the right (swapped) */}
-                {variant === "jury" ? (
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className={cn(
-                      "inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 border px-2.5 text-[10px] font-bold uppercase tracking-[0.1em] transition",
-                      t.menuBtn,
-                    )}
-                  >
-                    <LogOut size={14} aria-hidden />
-                    Logout
-                  </button>
-                ) : (
-                  compactContactBtn
-                )}
-              </div>
+              {variant === "jury" ? (
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className={cn(
+                    "inline-flex min-h-9 w-full items-center justify-center gap-1.5 border px-2.5 text-[10px] font-bold uppercase tracking-[0.1em] transition",
+                    t.menuBtn,
+                  )}
+                >
+                  <LogOut size={14} aria-hidden />
+                  Logout
+                </button>
+              ) : (
+                compactContactBtn
+              )}
             </div>
 
             {variant !== "jury" ? logoutBtn : null}
+            {variant !== "jury" ? profilePopup : null}
           </div>
         </div>
       </header>

@@ -355,14 +355,22 @@ function DetailInner({ params }: { params: Promise<{ id: string }> }) {
                 "Business currently operational",
                 "Willing to provide documentary evidence",
               ].map((label, i) => (
-                <li
-                  key={label}
-                  className="flex items-center justify-between gap-3 border border-black/10 px-3 py-2"
-                >
-                  <span>{label}</span>
-                  <span className="text-xs font-bold uppercase tracking-wide text-[#555]">
-                    {answers[`eligibility_${i}`] === "yes" ? "Confirmed" : "Not confirmed"}
-                  </span>
+                <li key={label} className="border border-black/10 px-3 py-2">
+                  <div className="flex items-center justify-between gap-3 text-sm">
+                    <span>{label}</span>
+                    <span className="text-xs font-bold uppercase tracking-wide text-[#555]">
+                      {answers[`eligibility_${i}`] === "yes"
+                        ? "Yes"
+                        : answers[`eligibility_${i}`] === "no"
+                          ? "No"
+                          : "Not answered"}
+                    </span>
+                  </div>
+                  {answers[`eligibility_${i}`] === "no" && answers[`eligibility_${i}_reason`] ? (
+                    <p className="mt-2 border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-950">
+                      Reason: {answers[`eligibility_${i}_reason`]}
+                    </p>
+                  ) : null}
                 </li>
               ))}
             </ul>

@@ -19,7 +19,12 @@ export function missingNominationFields(
   const missing: string[] = [];
 
   for (let i = 0; i < 4; i++) {
-    if (!yes(answers, `eligibility_${i}`)) missing.push(`Eligibility confirmation ${i + 1}`);
+    const v = String(answers[`eligibility_${i}`] ?? "").trim().toLowerCase();
+    if (v !== "yes" && v !== "no") {
+      missing.push(`Eligibility confirmation ${i + 1}`);
+    } else if (v === "no" && !filled(answers, `eligibility_${i}_reason`)) {
+      missing.push(`Eligibility reason ${i + 1}`);
+    }
   }
 
   if (!filled(answers, "overview_describe")) missing.push("Business description");
