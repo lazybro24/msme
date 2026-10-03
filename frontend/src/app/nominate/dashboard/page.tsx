@@ -28,16 +28,16 @@ type App = {
 };
 
 function decisionLabel(app: App) {
-  if (app.status === "DRAFT") return null;
   if (app.adminDecision === "REJECTED") {
     return {
       tone: "reject" as const,
-      title: "Not verified",
+      title: "We are not proceeding with this application",
       body:
         app.rejectionReason ||
-        "Your nomination was not verified by Admin. Please contact the secretariat for details.",
+        "The Awards Secretariat is not proceeding with this nomination.",
     };
   }
+  if (app.status === "DRAFT") return null;
   if (app.adminDecision === "ACCEPTED") {
     return {
       tone: "ok" as const,
@@ -389,10 +389,7 @@ function DashboardInner() {
                           <p className="font-bold uppercase tracking-wide text-[10px]">
                             {decision.title}
                           </p>
-                          <p className="mt-1">
-                            Your nomination was <strong>not verified</strong> because:{" "}
-                            {decision.body}
-                          </p>
+                          <p className="mt-1">{decision.body}</p>
                         </div>
                       )}
 

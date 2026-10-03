@@ -561,12 +561,11 @@ applicationsRouter.post(
       where: { OR: [{ applicationId: id }, { id }] },
     });
     if (!app) return res.status(404).json({ error: "Not found" });
-    if (app.status === "DRAFT") {
-      return res.status(400).json({ error: "Application not submitted yet" });
-    }
     const reason = String(req.body?.reason || "").trim();
     if (reason.length < 8) {
-      return res.status(400).json({ error: "Please provide a clear rejection reason (min 8 characters)" });
+      return res.status(400).json({
+        error: "Please provide a clear reason (min 8 characters)",
+      });
     }
     const updated = await prisma.application.update({
       where: { id: app.id },
@@ -577,21 +576,25 @@ applicationsRouter.post(
         assignedJuryIds: [],
         verifiedAt: new Date(),
         verifiedBy: req.user!.fullName,
+        progress: Math.max(app.progress, app.status === "DRAFT" ? app.progress : 100),
       },
     });
     await audit({
       actorId: req.user!.id,
       role: req.user!.roles[0],
-      action: "ADMIN_REJECTED",
+      action: "ADMIN_NOT_PROCEEDING",
       applicationId: app.applicationId,
       reason,
     });
     await notify(
       app.applicantId,
-      "Nomination not verified",
-      `${app.applicationId} was not verified. Reason: ${reason}`,
+      "We are not proceeding with this application",
+      `${app.applicationId}: ${reason}`,
     );
-    res.json({ application: appToApi(updated), message: "Rejected — applicant notified" });
+    res.json({
+      application: appToApi(updated),
+      message: "Marked not proceeding — applicant will see this on their dashboard",
+    });
   },
 );
 

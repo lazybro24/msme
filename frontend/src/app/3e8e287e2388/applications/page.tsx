@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PortalShell, StatusPill, secretariatNav } from "@/components/portal/PortalShell";
 import { AuthGate } from "@/components/portal/AuthGate";
-import { apiDelete, apiGet, apiPost } from "@/lib/api";
+import { apiGet, apiPost } from "@/lib/api";
 
 type AppRow = {
   applicationId: string;
@@ -35,7 +35,9 @@ function ApplicationsInner() {
   const [msg, setMsg] = useState("");
   const [busyId, setBusyId] = useState("");
   const [rejectId, setRejectId] = useState<string | null>(null);
-  const [rejectReason, setRejectReason] = useState("");
+  const [rejectReason, setRejectReason] = useState(
+    "We are not proceeding with this application.",
+  );
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [decisionFilter, setDecisionFilter] = useState("ALL");
@@ -90,36 +92,23 @@ function ApplicationsInner() {
     }
   }
 
-  async function rejectApplication() {
+  async function notProceeding(applicationId: string) {
+    setRejectId(applicationId);
+    setRejectReason("We are not proceeding with this application.");
+  }
+
+  async function confirmNotProceeding() {
     if (!rejectId) return;
     setBusyId(rejectId);
     setMsg("");
     try {
       await apiPost(`/api/applications/${rejectId}/reject`, { reason: rejectReason });
-      setMsg(`${rejectId} not verified — applicant will see your reason.`);
+      setMsg(`${rejectId} marked not proceeding — applicant will see this on their dashboard.`);
       setRejectId(null);
-      setRejectReason("");
+      setRejectReason("We are not proceeding with this application.");
       load();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Reject failed");
-    } finally {
-      setBusyId("");
-    }
-  }
-
-  async function deleteApplication(applicationId: string) {
-    const ok = window.confirm(
-      `Delete ${applicationId}? This permanently removes the nomination, documents metadata, clarifications, and evaluations.`,
-    );
-    if (!ok) return;
-    setBusyId(applicationId);
-    setMsg("");
-    try {
-      await apiDelete(`/api/applications/${applicationId}`);
-      setMsg(`${applicationId} deleted.`);
-      load();
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Delete failed");
+      setMsg(e instanceof Error ? e.message : "Failed");
     } finally {
       setBusyId("");
     }
@@ -244,13 +233,13 @@ function ApplicationsInner() {
 
         {rejectId && (
           <div className="mt-4 border border-red-200 bg-red-50 p-4">
-            <p className="font-semibold text-red-900">Not verify {rejectId}</p>
+            <p className="font-semibold text-red-900">Not proceeding — {rejectId}</p>
             <p className="mt-1 text-sm text-red-800">
-              Explain why this nomination is not verified. The applicant will see this message.
+              The applicant will see this message on their nomination dashboard. The application
+              stays listed there (it is not permanently erased).
             </p>
             <textarea
               className="input mt-3 min-h-[88px] bg-white"
-              placeholder="e.g. Mysuru operations could not be verified from uploaded documents…"
               value={rejectReason}
               onChange={(e) => setRejectReason(e.target.value)}
             />
@@ -259,16 +248,16 @@ function ApplicationsInner() {
                 type="button"
                 className="btn-primary !bg-red-700"
                 disabled={busyId === rejectId || rejectReason.trim().length < 8}
-                onClick={rejectApplication}
+                onClick={confirmNotProceeding}
               >
-                Confirm not verified
+                Confirm not proceeding
               </button>
               <button
                 type="button"
                 className="btn-secondary"
                 onClick={() => {
                   setRejectId(null);
-                  setRejectReason("");
+                  setRejectReason("We are not proceeding with this application.");
                 }}
               >
                 Cancel
@@ -324,27 +313,18 @@ function ApplicationsInner() {
                     >
                       {busyId === a.applicationId ? "…" : "Verify & send to Jury"}
                     </button>
-                    <button
-                      type="button"
-                      className="btn-secondary"
-                      disabled={busyId === a.applicationId}
-                      onClick={() => {
-                        setRejectId(a.applicationId);
-                        setRejectReason("");
-                      }}
-                    >
-                      Not verify
-                    </button>
                   </>
                 )}
-                <button
-                  type="button"
-                  className="btn-ghost text-red-700"
-                  disabled={busyId === a.applicationId}
-                  onClick={() => deleteApplication(a.applicationId)}
-                >
-                  Delete
-                </button>
+                {a.adminDecision !== "REJECTED" && (
+                  <button
+                    type="button"
+                    className="btn-secondary !border-red-300 !text-red-800"
+                    disabled={busyId === a.applicationId}
+                    onClick={() => notProceeding(a.applicationId)}
+                  >
+                    Not proceeding
+                  </button>
+                )}
               </div>
             </div>
           ))}

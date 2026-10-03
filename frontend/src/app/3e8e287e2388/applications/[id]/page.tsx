@@ -4,10 +4,9 @@ import Link from "next/link";
 import { FormEvent, use, useEffect, useMemo, useState } from "react";
 import { PortalShell, StatusPill, secretariatNav } from "@/components/portal/PortalShell";
 import { AuthGate } from "@/components/portal/AuthGate";
-import { apiDelete, apiGet, apiPost } from "@/lib/api";
+import { apiGet, apiPost } from "@/lib/api";
 import { authFileUrl } from "@/lib/files";
 import { awardCategories } from "@/content/awards";
-import { useRouter } from "next/navigation";
 
 type DraftJson = {
   answers?: Record<string, string>;
@@ -593,72 +592,60 @@ function DetailInner({ params }: { params: Promise<{ id: string }> }) {
                 >
                   Verify & send to Jury
                 </button>
-                <button
-                  type="button"
-                  className="btn-secondary w-full"
-                  disabled={busy}
-                  onClick={() => setRejectOpen((v) => !v)}
-                >
-                  Not verify
-                </button>
-                {rejectOpen && (
-                  <div className="space-y-2 border border-red-200 bg-red-50 p-3">
-                    <textarea
-                      className="input min-h-20 bg-white text-sm"
-                      placeholder="Reason shown to applicant…"
-                      value={rejectReason}
-                      onChange={(e) => setRejectReason(e.target.value)}
-                    />
-                    <button
-                      type="button"
-                      className="btn-primary w-full !bg-red-700"
-                      disabled={busy || rejectReason.trim().length < 8}
-                      onClick={async () => {
-                        setBusy(true);
-                        try {
-                          await apiPost(`/api/applications/${id}/reject`, {
-                            reason: rejectReason,
-                          });
-                          setMsg("Marked not verified");
-                          setRejectOpen(false);
-                          await loadApp();
-                        } catch (err) {
-                          setMsg(err instanceof Error ? err.message : "Reject failed");
-                        } finally {
-                          setBusy(false);
-                        }
-                      }}
-                    >
-                      Confirm not verified
-                    </button>
-                  </div>
-                )}
               </>
             )}
           <button type="button" className="btn-secondary w-full" onClick={() => setShowClarify(true)}>
             Request Clarification
           </button>
-          <button
-            type="button"
-            className="btn-ghost w-full text-red-700"
-            disabled={busy}
-            onClick={async () => {
-              const ok = window.confirm(
-                `Delete ${app.applicationId}? This cannot be undone.`,
-              );
-              if (!ok) return;
-              setBusy(true);
-              try {
-                await apiDelete(`/api/applications/${id}`);
-                router.push("/3e8e287e2388/applications");
-              } catch (err) {
-                setMsg(err instanceof Error ? err.message : "Delete failed");
-                setBusy(false);
-              }
-            }}
-          >
-            Delete application
-          </button>
+          {app.adminDecision !== "REJECTED" && (
+            <>
+              <button
+                type="button"
+                className="btn-secondary w-full !border-red-300 !text-red-800"
+                disabled={busy}
+                onClick={() => {
+                  setRejectOpen(true);
+                  setRejectReason("We are not proceeding with this application.");
+                }}
+              >
+                Not proceeding
+              </button>
+              {rejectOpen && (
+                <div className="space-y-2 border border-red-200 bg-red-50 p-3">
+                  <p className="text-xs text-red-900">
+                    Applicant will see this on their dashboard. Application is kept, not erased.
+                  </p>
+                  <textarea
+                    className="input min-h-20 bg-white text-sm"
+                    value={rejectReason}
+                    onChange={(e) => setRejectReason(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="btn-primary w-full !bg-red-700"
+                    disabled={busy || rejectReason.trim().length < 8}
+                    onClick={async () => {
+                      setBusy(true);
+                      try {
+                        await apiPost(`/api/applications/${id}/reject`, {
+                          reason: rejectReason,
+                        });
+                        setMsg("Marked not proceeding — visible on applicant dashboard");
+                        setRejectOpen(false);
+                        await loadApp();
+                      } catch (err) {
+                        setMsg(err instanceof Error ? err.message : "Failed");
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  >
+                    Confirm not proceeding
+                  </button>
+                </div>
+              )}
+            </>
+          )}
           <div className="border-t border-black/10 pt-3">
             <label className="label">Change status</label>
             <select className="input" defaultValue={app.status} id="admin-status">
