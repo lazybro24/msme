@@ -4,9 +4,10 @@ import Link from "next/link";
 import { FormEvent, use, useEffect, useMemo, useState } from "react";
 import { PortalShell, StatusPill, secretariatNav } from "@/components/portal/PortalShell";
 import { AuthGate } from "@/components/portal/AuthGate";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiDelete, apiGet, apiPost } from "@/lib/api";
 import { authFileUrl } from "@/lib/files";
 import { awardCategories } from "@/content/awards";
+import { useRouter } from "next/navigation";
 
 type DraftJson = {
   answers?: Record<string, string>;
@@ -52,6 +53,8 @@ type App = {
   evidenceStrength?: string;
   draftJson?: DraftJson;
   submittedAt?: string;
+  adminDecision?: "PENDING" | "ACCEPTED" | "REJECTED";
+  rejectionReason?: string;
 };
 
 type Doc = {
@@ -145,12 +148,16 @@ function NarrativeList({ rows }: { rows: [string, string | undefined | null][] }
 
 function DetailInner({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
   const [app, setApp] = useState<App | null>(null);
   const [org, setOrg] = useState<OrgProfile | null>(null);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [mandatory, setMandatory] = useState<Mandatory[]>([]);
   const [showClarify, setShowClarify] = useState(false);
   const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
 
   function loadDocs() {
     apiGet<{ documents: Doc[]; mandatory: Mandatory[] }>(`/api/documents/application/${id}`)
@@ -553,8 +560,104 @@ function DetailInner({ params }: { params: Promise<{ id: string }> }) {
           <a href="#documents" className="btn-primary w-full text-center">
             Jump to documents
           </a>
+          {(app.adminDecision === "PENDING" || !app.adminDecision) &&
+            [
+              "SUBMITTED",
+              "ELIGIBILITY_REVIEW",
+              "CLARIFICATION_REQUIRED",
+              "VERIFICATION",
+              "QUALIFIED",
+              "READY_FOR_JURY",
+            ].includes(app.status) && (
+              <>
+                <button
+                  type="button"
+                  className="btn-gold w-full"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true);
+                    setMsg("");
+                    try {
+                      const res = await apiPost<{ message?: string }>(
+                        `/api/applications/${id}/accept-for-jury`,
+                        {},
+                      );
+                      setMsg(res.message || "Verified and sent to jury");
+                      await loadApp();
+                    } catch (err) {
+                      setMsg(err instanceof Error ? err.message : "Verify failed");
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  Verify & send to Jury
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary w-full"
+                  disabled={busy}
+                  onClick={() => setRejectOpen((v) => !v)}
+                >
+                  Not verify
+                </button>
+                {rejectOpen && (
+                  <div className="space-y-2 border border-red-200 bg-red-50 p-3">
+                    <textarea
+                      className="input min-h-20 bg-white text-sm"
+                      placeholder="Reason shown to applicant…"
+                      value={rejectReason}
+                      onChange={(e) => setRejectReason(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="btn-primary w-full !bg-red-700"
+                      disabled={busy || rejectReason.trim().length < 8}
+                      onClick={async () => {
+                        setBusy(true);
+                        try {
+                          await apiPost(`/api/applications/${id}/reject`, {
+                            reason: rejectReason,
+                          });
+                          setMsg("Marked not verified");
+                          setRejectOpen(false);
+                          await loadApp();
+                        } catch (err) {
+                          setMsg(err instanceof Error ? err.message : "Reject failed");
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    >
+                      Confirm not verified
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
           <button type="button" className="btn-secondary w-full" onClick={() => setShowClarify(true)}>
             Request Clarification
+          </button>
+          <button
+            type="button"
+            className="btn-ghost w-full text-red-700"
+            disabled={busy}
+            onClick={async () => {
+              const ok = window.confirm(
+                `Delete ${app.applicationId}? This cannot be undone.`,
+              );
+              if (!ok) return;
+              setBusy(true);
+              try {
+                await apiDelete(`/api/applications/${id}`);
+                router.push("/3e8e287e2388/applications");
+              } catch (err) {
+                setMsg(err instanceof Error ? err.message : "Delete failed");
+                setBusy(false);
+              }
+            }}
+          >
+            Delete application
           </button>
           <div className="border-t border-black/10 pt-3">
             <label className="label">Change status</label>

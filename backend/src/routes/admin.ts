@@ -40,6 +40,51 @@ adminRouter.get(
   },
 );
 
+adminRouter.get(
+  "/moderation-queue",
+  requireAuth,
+  requireRoles("ADMINISTRATOR", "JURY_CHAIR", "OBSERVER"),
+  async (_req, res) => {
+    const apps = await prisma.application.findMany({
+      where: {
+        OR: [
+          { status: "MODERATION_REQUIRED" },
+          { status: "JURY_EVALUATION" },
+          { status: "FINAL_ASSESSMENT" },
+        ],
+      },
+      orderBy: { updatedAt: "desc" },
+      take: 100,
+    });
+
+    const queue = [];
+    for (const app of apps) {
+      const list = await prisma.evaluation.findMany({
+        where: { applicationId: app.id, lockedAt: { not: null } },
+      });
+      if (list.length < 2 && app.status !== "MODERATION_REQUIRED") continue;
+      const totals = list.map((e) => e.totalScore ?? 0);
+      const variance = totals.length ? Math.max(...totals) - Math.min(...totals) : 0;
+      const moderationRequired = app.status === "MODERATION_REQUIRED" || variance > 20;
+      if (!moderationRequired && app.status !== "MODERATION_REQUIRED") continue;
+      queue.push({
+        applicationId: app.applicationId,
+        organisationName: app.organisationName,
+        categoryTitle: app.categoryTitle,
+        status: app.status,
+        lockedScores: list.length,
+        variance,
+        average: totals.length
+          ? Number((totals.reduce((s, n) => s + n, 0) / totals.length).toFixed(2))
+          : null,
+        scores: list.map((e) => ({ judge: e.juryName, score: e.totalScore })),
+      });
+    }
+
+    res.json({ queue });
+  },
+);
+
 adminRouter.get("/audit", requireAuth, requireRoles("ADMINISTRATOR", "OBSERVER", "JURY_CHAIR"), async (_req, res) => {
   const events = await prisma.auditEvent.findMany({
     take: 100,

@@ -117,12 +117,46 @@ clarificationsRouter.post(
   },
 );
 
+clarificationsRouter.post("/:id/close", requireAuth, requireRoles("ADMINISTRATOR", "VERIFICATION"), async (req: AuthRequest, res) => {
+  const item = await prisma.clarification.findUnique({ where: { id: String(req.params.id) } });
+  if (!item) return res.status(404).json({ error: "Not found" });
+  const note = String(req.body?.body || "Closed by secretariat").trim();
+  const thread = Array.isArray(item.thread) ? [...(item.thread as object[])] : [];
+  thread.push({
+    id: crypto.randomUUID(),
+    at: new Date().toISOString(),
+    by: req.user!.fullName,
+    role: req.user!.roles[0],
+    body: note,
+  });
+  const updated = await prisma.clarification.update({
+    where: { id: item.id },
+    data: { thread, status: "CLOSED" },
+  });
+  await audit({
+    actorId: req.user!.id,
+    role: req.user!.roles[0],
+    action: "CLARIFICATION_CLOSED",
+    applicationId: item.applicationRef,
+  });
+  res.json({
+    clarification: {
+      ...updated,
+      applicationId: updated.applicationRef,
+    },
+  });
+});
+
 clarificationsRouter.post("/:id/respond", requireAuth, async (req: AuthRequest, res) => {
   const item = await prisma.clarification.findUnique({ where: { id: String(req.params.id) } });
   if (!item) return res.status(404).json({ error: "Not found" });
   const app = await prisma.application.findUnique({ where: { id: item.applicationId } });
   if (!app) return res.status(404).json({ error: "Application not found" });
-  if (app.applicantId !== req.user!.id && !req.user!.roles.includes("ADMINISTRATOR")) {
+  if (
+    app.applicantId !== req.user!.id &&
+    !req.user!.roles.includes("ADMINISTRATOR") &&
+    !req.user!.roles.includes("VERIFICATION")
+  ) {
     return res.status(403).json({ error: "Forbidden" });
   }
   const body = String(req.body?.body || "").trim();
@@ -136,9 +170,11 @@ clarificationsRouter.post("/:id/respond", requireAuth, async (req: AuthRequest, 
     body,
     documentName: req.body?.documentName || undefined,
   });
+  const isStaff =
+    req.user!.roles.includes("ADMINISTRATOR") || req.user!.roles.includes("VERIFICATION");
   const updated = await prisma.clarification.update({
     where: { id: item.id },
-    data: { thread, status: "RESPONDED" },
+    data: { thread, status: isStaff ? "OPEN" : "RESPONDED" },
   });
   await audit({
     actorId: req.user!.id,
@@ -146,14 +182,18 @@ clarificationsRouter.post("/:id/respond", requireAuth, async (req: AuthRequest, 
     action: "CLARIFICATION_RESPONDED",
     applicationId: app.applicationId,
   });
-  const verifiers = await prisma.user.findMany({
-    where: { OR: [{ roles: { has: "VERIFICATION" } }, { roles: { has: "ADMINISTRATOR" } }] },
-  });
-  await Promise.all(
-    verifiers.map((v) =>
-      notify(v.id, "Clarification received", `${app.applicationId} responded.`),
-    ),
-  );
+  if (!isStaff) {
+    const verifiers = await prisma.user.findMany({
+      where: { OR: [{ roles: { has: "VERIFICATION" } }, { roles: { has: "ADMINISTRATOR" } }] },
+    });
+    await Promise.all(
+      verifiers.map((v) =>
+        notify(v.id, "Clarification received", `${app.applicationId} responded.`),
+      ),
+    );
+  } else {
+    await notify(app.applicantId, "Clarification update", body.slice(0, 120)).catch(() => undefined);
+  }
   res.json({
     clarification: {
       ...updated,

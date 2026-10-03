@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PortalShell, StatusPill, secretariatNav } from "@/components/portal/PortalShell";
 import { AuthGate } from "@/components/portal/AuthGate";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiDelete, apiGet, apiPost } from "@/lib/api";
 
 type AppRow = {
   applicationId: string;
@@ -18,6 +18,7 @@ type AppRow = {
   assignedJuryIds?: string[];
   adminDecision?: "PENDING" | "ACCEPTED" | "REJECTED";
   rejectionReason?: string;
+  submittedAt?: string;
 };
 
 const PENDING_VERIFY = new Set([
@@ -35,6 +36,9 @@ function ApplicationsInner() {
   const [busyId, setBusyId] = useState("");
   const [rejectId, setRejectId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
+  const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [decisionFilter, setDecisionFilter] = useState("ALL");
 
   const load = useCallback(() => {
     apiGet<{ applications: AppRow[] }>("/api/applications")
@@ -45,6 +49,26 @@ function ApplicationsInner() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return apps.filter((a) => {
+      if (statusFilter !== "ALL" && a.status !== statusFilter) return false;
+      if (decisionFilter !== "ALL" && (a.adminDecision || "PENDING") !== decisionFilter) return false;
+      if (!needle) return true;
+      return (
+        a.applicationId.toLowerCase().includes(needle) ||
+        a.organisationName.toLowerCase().includes(needle) ||
+        a.categoryTitle.toLowerCase().includes(needle) ||
+        (a.categoryCode || "").toLowerCase().includes(needle)
+      );
+    });
+  }, [apps, q, statusFilter, decisionFilter]);
+
+  const statuses = useMemo(
+    () => Array.from(new Set(apps.map((a) => a.status))).sort(),
+    [apps],
+  );
 
   async function acceptForJury(applicationId: string) {
     setBusyId(applicationId);
@@ -83,10 +107,67 @@ function ApplicationsInner() {
     }
   }
 
+  async function deleteApplication(applicationId: string) {
+    const ok = window.confirm(
+      `Delete ${applicationId}? This permanently removes the nomination, documents metadata, clarifications, and evaluations.`,
+    );
+    if (!ok) return;
+    setBusyId(applicationId);
+    setMsg("");
+    try {
+      await apiDelete(`/api/applications/${applicationId}`);
+      setMsg(`${applicationId} deleted.`);
+      load();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setBusyId("");
+    }
+  }
+
+  function exportCsv() {
+    const header = [
+      "applicationId",
+      "organisationName",
+      "categoryTitle",
+      "categoryCode",
+      "sector",
+      "msme",
+      "status",
+      "adminDecision",
+      "rejectionReason",
+      "submittedAt",
+    ];
+    const rows = filtered.map((a) =>
+      [
+        a.applicationId,
+        a.organisationName,
+        a.categoryTitle,
+        a.categoryCode || "",
+        a.sector,
+        a.msme,
+        a.status,
+        a.adminDecision || "PENDING",
+        a.rejectionReason || "",
+        a.submittedAt || "",
+      ]
+        .map((v) => `"${String(v).replaceAll('"', '""')}"`)
+        .join(","),
+    );
+    const blob = new Blob([[header.join(","), ...rows].join("\n")], {
+      type: "text/csv;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `msme-nominations-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   function canVerify(a: AppRow) {
     return (
-      (a.adminDecision === "PENDING" || !a.adminDecision) &&
-      PENDING_VERIFY.has(a.status)
+      (a.adminDecision === "PENDING" || !a.adminDecision) && PENDING_VERIFY.has(a.status)
     );
   }
 
@@ -101,13 +182,59 @@ function ApplicationsInner() {
         <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--brand-gold-dark)]">
           Admin · Verification
         </p>
-        <h1 className="mt-2 font-display text-2xl font-black italic uppercase sm:text-3xl">
-          Nomination Queue
-        </h1>
-        <p className="mt-2 text-sm text-[#666]">
-          New nominations wait here. Verify (Accept) to send to category jury, or Not Verify with a
-          reason the applicant will see on their dashboard.
-        </p>
+        <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="font-display text-2xl font-black italic uppercase sm:text-3xl">
+              Nomination Queue
+            </h1>
+            <p className="mt-2 text-sm text-[#666]">
+              View full nominations, verify for jury, reject with a reason, or delete.
+            </p>
+          </div>
+          <button type="button" className="btn-secondary" onClick={exportCsv}>
+            Export CSV ({filtered.length})
+          </button>
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <div>
+            <label className="label">Search</label>
+            <input
+              className="input"
+              placeholder="ID, organisation, category…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="label">Status</label>
+            <select
+              className="input"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+            >
+              <option value="ALL">All statuses</option>
+              {statuses.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="label">Admin decision</label>
+            <select
+              className="input"
+              value={decisionFilter}
+              onChange={(e) => setDecisionFilter(e.target.value)}
+            >
+              <option value="ALL">All</option>
+              <option value="PENDING">Pending</option>
+              <option value="ACCEPTED">Accepted</option>
+              <option value="REJECTED">Rejected</option>
+            </select>
+          </div>
+        </div>
 
         {msg && (
           <p className="mt-4 border border-[var(--brand-gold)]/30 bg-[var(--brand-gold)]/10 px-4 py-3 text-sm">
@@ -151,7 +278,7 @@ function ApplicationsInner() {
         )}
 
         <div className="mt-6 space-y-3">
-          {apps.map((a) => (
+          {filtered.map((a) => (
             <div key={a.applicationId} className="border border-black/10 bg-[#f7f4f2] p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -167,9 +294,7 @@ function ApplicationsInner() {
                     {a.categoryCode ? ` (${a.categoryCode})` : ""} · {a.sector} · {a.msme}
                   </p>
                   {a.adminDecision === "REJECTED" && a.rejectionReason && (
-                    <p className="mt-2 text-sm text-red-800">
-                      Not verified: {a.rejectionReason}
-                    </p>
+                    <p className="mt-2 text-sm text-red-800">Not verified: {a.rejectionReason}</p>
                   )}
                   {a.adminDecision === "ACCEPTED" && (
                     <p className="mt-2 text-sm text-emerald-800">
@@ -182,48 +307,52 @@ function ApplicationsInner() {
                 </div>
                 <StatusPill status={a.status.replaceAll("_", " ")} />
               </div>
-              {canVerify(a) && (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Link
-                    href={`/3e8e287e2388/applications/${a.applicationId}`}
-                    className="btn-primary"
-                  >
-                    View application
-                  </Link>
-                  <button
-                    type="button"
-                    className="btn-gold"
-                    disabled={busyId === a.applicationId}
-                    onClick={() => acceptForJury(a.applicationId)}
-                  >
-                    {busyId === a.applicationId ? "…" : "Verify & send to Jury"}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    disabled={busyId === a.applicationId}
-                    onClick={() => {
-                      setRejectId(a.applicationId);
-                      setRejectReason("");
-                    }}
-                  >
-                    Not verify
-                  </button>
-                </div>
-              )}
-              {!canVerify(a) && (
-                <div className="mt-4">
-                  <Link
-                    href={`/3e8e287e2388/applications/${a.applicationId}`}
-                    className="btn-primary"
-                  >
-                    View application
-                  </Link>
-                </div>
-              )}
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Link
+                  href={`/3e8e287e2388/applications/${a.applicationId}`}
+                  className="btn-primary"
+                >
+                  View application
+                </Link>
+                {canVerify(a) && (
+                  <>
+                    <button
+                      type="button"
+                      className="btn-gold"
+                      disabled={busyId === a.applicationId}
+                      onClick={() => acceptForJury(a.applicationId)}
+                    >
+                      {busyId === a.applicationId ? "…" : "Verify & send to Jury"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      disabled={busyId === a.applicationId}
+                      onClick={() => {
+                        setRejectId(a.applicationId);
+                        setRejectReason("");
+                      }}
+                    >
+                      Not verify
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  className="btn-ghost text-red-700"
+                  disabled={busyId === a.applicationId}
+                  onClick={() => deleteApplication(a.applicationId)}
+                >
+                  Delete
+                </button>
+              </div>
             </div>
           ))}
-          {!apps.length && <p className="text-sm text-[#666]">No nominations yet.</p>}
+          {!filtered.length && (
+            <p className="text-sm text-[#666]">
+              {apps.length ? "No nominations match these filters." : "No nominations yet."}
+            </p>
+          )}
         </div>
       </div>
     </PortalShell>

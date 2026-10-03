@@ -32,9 +32,12 @@ export const secretariatNav = [
   { href: adminHref("/users"), label: "Users" },
   { href: adminHref("/inbox"), label: "Inbox" },
   { href: adminHref("/applications"), label: "Applications" },
+  { href: adminHref("/clarifications"), label: "Clarifications" },
   { href: adminHref("/jury-profiles"), label: "Jury Profiles" },
   { href: adminHref("/assignments"), label: "Jury Assignment" },
   { href: adminHref("/moderation"), label: "Moderation" },
+  { href: adminHref("/document-requirements"), label: "Doc Requirements" },
+  { href: adminHref("/settings"), label: "Settings" },
   { href: adminHref("/audit"), label: "Audit Log" },
 ] as const;
 

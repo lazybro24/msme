@@ -328,36 +328,54 @@ applicationsRouter.delete(
       "RANKING_READY",
       "RESULT_LOCKED",
     ];
-    if (app.adminDecision === "ACCEPTED" || lockedStatuses.includes(app.status)) {
+    // Applicants cannot delete once jury/results started; administrators can force-delete.
+    if (
+      !isAdmin &&
+      (app.adminDecision === "ACCEPTED" || lockedStatuses.includes(app.status))
+    ) {
       return res.status(400).json({
         error:
           "This nomination is already in jury / results processing and cannot be deleted. Contact the secretariat if you need to withdraw.",
       });
     }
 
+    await prisma.clarification.deleteMany({ where: { applicationId: app.id } });
+    await prisma.evaluation.deleteMany({ where: { applicationId: app.id } });
     await prisma.document.deleteMany({ where: { applicationId: app.id } });
     await prisma.application.delete({ where: { id: app.id } });
 
     await audit({
       actorId: user.id,
       role: user.roles[0],
-      action: "APPLICATION_DELETED",
+      action: isAdmin ? "APPLICATION_DELETED_BY_ADMIN" : "APPLICATION_DELETED",
       applicationId: app.applicationId,
       afterJson: {
         categoryCode: app.categoryCode,
         categoryTitle: app.categoryTitle,
         status: app.status,
+        adminDecision: app.adminDecision,
       },
     });
-    await notify(
-      app.applicantId,
-      "Application removed",
-      `${app.applicationId} (${app.categoryTitle}) was deleted. You are no longer participating in this category.`,
-    );
+
+    if (!isAdmin) {
+      await notify(
+        app.applicantId,
+        "Application removed",
+        `${app.applicationId} (${app.categoryTitle}) was deleted. You are no longer participating in this category.`,
+      );
+    } else if (app.applicantId !== user.id) {
+      await notify(
+        app.applicantId,
+        "Application removed by secretariat",
+        `${app.applicationId} (${app.categoryTitle}) was removed by the Awards Secretariat.`,
+      ).catch(() => undefined);
+    }
 
     res.json({
       ok: true,
-      message: `Removed from ${app.categoryTitle}. You are no longer participating in this category.`,
+      message: isAdmin
+        ? "Application deleted."
+        : `Removed from ${app.categoryTitle}. You are no longer participating in this category.`,
     });
   },
 );
