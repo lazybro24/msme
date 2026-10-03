@@ -165,14 +165,36 @@ function DashboardInner() {
 
   const docsReady = docsComplete >= docsTotal && docsTotal > 0;
   const hasCategory = apps.length > 0;
-  const draftApp = apps.find((a) => a.status === "DRAFT");
-  const submitted = apps.some((a) => a.status !== "DRAFT");
+  const draftApps = apps.filter((a) => a.status === "DRAFT");
+  const draftApp = draftApps[0];
+  const anySubmitted = apps.some((a) => a.status !== "DRAFT");
+  const scorecardMode =
+    apps.length > 1 && (anySubmitted || apps.some((a) => a.progress >= 40));
+  const submitted = anySubmitted && draftApps.length === 0;
   const reviewHref = draftApp
-    ? `/nominate/applications/${draftApp.applicationId}`
+    ? `/nominate/applications/${draftApp.applicationId}${scorecardMode ? "?focus=scorecard" : ""}`
     : apps[0]
       ? `/nominate/applications/${apps[0].applicationId}`
       : "/nominate/categories";
   const categoryNames = apps.map((a) => a.categoryTitle).filter(Boolean);
+
+  function categoryFormHref(app: App) {
+    if (!docsReady && app.status === "DRAFT") return "/nominate/documents";
+    if (app.status === "DRAFT" && scorecardMode) {
+      return `/nominate/applications/${app.applicationId}?focus=scorecard`;
+    }
+    return `/nominate/applications/${app.applicationId}`;
+  }
+
+  function categoryFormLabel(app: App) {
+    if (app.status === "DRAFT") {
+      if (!docsReady) return "Finish documents first";
+      if (scorecardMode) return "Complete scorecard";
+      return apps.length > 1 ? "Continue nomination" : "Continue nomination form";
+    }
+    if (app.status === "CLARIFICATION_REQUIRED") return "Open Messages";
+    return "View status";
+  }
 
   const accountDone = true;
   const profileDone = profileComplete;
@@ -224,15 +246,17 @@ function DashboardInner() {
     {
       id: 5,
       label: "5. Nomination form",
-      title: "Complete nomination form",
+      title: scorecardMode ? "Finish category scorecards" : "Complete nomination form",
       body:
         apps.length > 1
-          ? `One shared form for your nomination. Category-specific questions cover: ${categoryNames.join(" · ")}.`
+          ? scorecardMode
+            ? `Shared details are done. Complete and submit the scorecard for each remaining category: ${draftApps.map((a) => a.categoryTitle).join(" · ") || categoryNames.join(" · ")}.`
+            : `One nomination for ${categoryNames.join(" · ")}. Fill shared details once, then each category’s scorecard.`
           : "Answer each section in order, then review and submit for verification.",
       href: reviewHref,
-      done: submitDone,
+      done: submitted,
       locked: !profileDone || !categoryDone || !documentsDone,
-      current: profileDone && categoryDone && documentsDone && !submitDone,
+      current: profileDone && categoryDone && documentsDone && !submitted,
     },
   ];
 
@@ -240,7 +264,9 @@ function DashboardInner() {
   const nextHref = currentStep.href;
   const nextLabel = currentStep.current
     ? currentStep.id === 5
-      ? "Continue nomination form"
+      ? scorecardMode && draftApps[0]
+        ? `Complete scorecard · ${draftApps[0].categoryTitle}`
+        : "Continue nomination form"
       : `Continue · ${currentStep.title}`
     : submitDone
       ? "Open Application"
@@ -364,13 +390,28 @@ function DashboardInner() {
               {apps.length > 0 ? (
                 <>
                   <p className="mt-2 text-sm text-[#666]">
-                    Participating in{" "}
-                    <span className="font-semibold text-[#1a1814]">
-                      {apps.length} categor{apps.length === 1 ? "y" : "ies"}
-                    </span>
-                    : {categoryNames.join(" · ")}. Shared answers are filled once; only category
-                    scorecard questions differ.
+                    {apps.length > 1 ? (
+                      <>
+                        One nomination · {apps.length} categories:{" "}
+                        <span className="font-semibold text-[#1a1814]">
+                          {categoryNames.join(" · ")}
+                        </span>
+                        . Shared business details are filled once. Each category only needs its own
+                        scorecard answers, then submit.
+                      </>
+                    ) : (
+                      <>
+                        Category:{" "}
+                        <span className="font-semibold text-[#1a1814]">{categoryNames[0]}</span>
+                      </>
+                    )}
                   </p>
+                  {scorecardMode && draftApps.length > 0 && (
+                    <p className="mt-2 border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+                      Shared sections are ready. Next: complete the scorecard and submit for{" "}
+                      {draftApps.map((a) => a.categoryTitle).join(" and ")}.
+                    </p>
+                  )}
                   <div className="mt-5 space-y-3">
                     {apps.map((app) => {
                       const decision = decisionLabel(app);
@@ -433,32 +474,15 @@ function DashboardInner() {
 
                           <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                             <div className="flex flex-wrap gap-2">
-                              {!docsReady && app.status === "DRAFT" && (
-                                <Link href="/nominate/documents" className="btn-secondary !min-h-9 !text-[10px]">
-                                  Upload documents first
-                                </Link>
-                              )}
                               <Link
-                                href={
-                                  !docsReady && app.status === "DRAFT"
-                                    ? "/nominate/documents"
-                                    : `/nominate/applications/${app.applicationId}`
-                                }
+                                href={categoryFormHref(app)}
                                 className={
                                   docsReady || app.status !== "DRAFT"
                                     ? "btn-primary !min-h-9 !text-[10px]"
                                     : "btn-ghost !min-h-9 !text-[10px]"
                                 }
                               >
-                                {app.status === "DRAFT"
-                                  ? docsReady
-                                    ? apps.length > 1
-                                      ? "Open form · this category"
-                                      : "Continue nomination form"
-                                    : "Finish documents first"
-                                  : app.status === "CLARIFICATION_REQUIRED"
-                                    ? "Open Messages"
-                                    : "View category"}
+                                {categoryFormLabel(app)}
                               </Link>
                             </div>
                             {canDeleteApp(app) && (
@@ -476,9 +500,11 @@ function DashboardInner() {
                       );
                     })}
                   </div>
-                  {apps.some((a) => a.status === "DRAFT") && docsReady && (
-                    <Link href={reviewHref} className="btn-secondary mt-5 inline-flex">
-                      Continue shared nomination form →
+                  {draftApps.length > 0 && docsReady && (
+                    <Link href={reviewHref} className="btn-primary mt-5 inline-flex">
+                      {scorecardMode
+                        ? `Continue · ${draftApps[0].categoryTitle} scorecard →`
+                        : "Continue nomination →"}
                     </Link>
                   )}
                 </>
@@ -499,13 +525,12 @@ function DashboardInner() {
                 {apps.length ? "Add a category" : "Choose categories"}
               </h2>
               <p className="mt-2 text-sm text-[#666]">
-                You can participate in up to 2 award categories ({apps.length}/2). Shared form
-                answers apply to all; only scorecard questions are per category.
+                Up to 2 categories ({apps.length}/2). Same business details for all — only the
+                scorecard differs per category.
               </p>
               {apps.length >= 2 ? (
                 <p className="mt-5 border border-black/10 bg-[#f7f4f2] px-4 py-3 text-sm text-[#555]">
-                  Category limit reached (2/2). Open the nomination form above or leave a category
-                  to change.
+                  Category limit reached (2/2). Leave a category above if you need to change.
                 </p>
               ) : !profileComplete ? (
                 <div className="mt-5 space-y-3">

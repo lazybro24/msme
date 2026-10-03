@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { use, useEffect, useMemo, useRef, useState } from "react";
+import { use, useEffect, useMemo, useRef, useState, Suspense } from "react";
 import { Pencil } from "lucide-react";
 import {
   applicantNav,
@@ -24,7 +24,7 @@ import {
   firstIncompleteStep,
   missingNominationFields,
 } from "@/lib/nominationCompleteness";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ProcessOverlay } from "@/components/ui/ProcessOverlay";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 
@@ -48,6 +48,8 @@ function WorkspaceInner({
 }) {
   const { id } = use(params);
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const focusScorecard = searchParams.get("focus") === "scorecard";
   const code = id.split("-")[1] ?? "MFG";
   const byCode = awardCategories.find((c) => c.code === code);
   const [appMeta, setAppMeta] = useState({
@@ -145,9 +147,12 @@ function WorkspaceInner({
           typeof draft?.step === "number" && draft.step >= 1 && draft.step <= applicationSteps.length
             ? draft.step
             : 1;
-        // Never resume past the first incomplete section
-        setStep(Math.min(draftStep, resume));
 
+        let listApps: {
+          applicationId: string;
+          categoryTitle: string;
+          status: string;
+        }[] = [];
         try {
           const list = await apiGet<{
             applications: {
@@ -156,11 +161,27 @@ function WorkspaceInner({
               status: string;
             }[];
           }>("/api/applications");
-          if (!cancelled) {
-            setSiblingApps(list.applications || []);
-          }
+          listApps = list.applications || [];
+          if (!cancelled) setSiblingApps(listApps);
         } catch {
           if (!cancelled) setSiblingApps([]);
+        }
+
+        const otherSubmitted = listApps.some(
+          (a) => a.applicationId !== d.application.applicationId && a.status !== "DRAFT",
+        );
+        const sharedReady =
+          String(loadedAnswers.overview_describe || "").trim().length > 0 ||
+          String(loadedAnswers.decl_signatory || "").trim().length > 0;
+        // Multi-category: after shared details exist, land on scorecard (not step 1)
+        const preferScorecard =
+          statusRaw === "DRAFT" &&
+          (focusScorecard || otherSubmitted || (listApps.length > 1 && sharedReady && resume >= 5));
+
+        if (preferScorecard) {
+          setStep(Math.min(Math.max(5, resume), applicationSteps.length));
+        } else {
+          setStep(Math.min(draftStep, resume));
         }
       } catch {
         /* ignore */
@@ -175,7 +196,7 @@ function WorkspaceInner({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id, focusScorecard]);
 
   function collectStepAnswers(): Answers {
     const root = stepRootRef.current;
@@ -360,10 +381,10 @@ function WorkspaceInner({
 
   return (
     <PortalShell
-      brand="Application Workspace"
+      brand="Nomination"
       subtitle={
         siblingApps.length > 1
-          ? `Participating in ${siblingApps.length} categories · ${appMeta.id}`
+          ? `One nomination · ${siblingApps.length} categories`
           : `${appMeta.categoryTitle} · ${appMeta.id}`
       }
       nav={applicantNav}
@@ -383,17 +404,20 @@ function WorkspaceInner({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--brand-gold-dark)]">
-              Nomination form — {completion}%
+              {siblingApps.length > 1 ? "Shared nomination" : "Nomination form"} — {completion}%
             </p>
             <h1 className="mt-1 font-display text-2xl font-black italic uppercase sm:text-3xl">
-              {appMeta.categoryTitle}
+              {step === 5 || focusScorecard
+                ? `Scorecard · ${appMeta.categoryTitle}`
+                : siblingApps.length > 1
+                  ? "Your nomination"
+                  : appMeta.categoryTitle}
             </h1>
             <p className="text-sm text-[#888]">{appMeta.id}</p>
             {siblingApps.length > 1 && (
               <p className="mt-2 text-sm text-[#555]">
-                Participating in {siblingApps.length} categories:{" "}
-                {siblingApps.map((a) => a.categoryTitle).join(" · ")}. Shared answers save to both;
-                switch below for category-specific questions.
+                Shared details apply to all categories. Use the tabs below only to answer each
+                category’s scorecard, then submit that category.
               </p>
             )}
             {savedAt && (
@@ -407,41 +431,47 @@ function WorkspaceInner({
         </div>
 
         {siblingApps.length > 1 && (
-          <div className="mt-4 flex flex-wrap gap-2">
-            {siblingApps.map((sib) => {
-              const active = sib.applicationId === appMeta.id;
-              return (
-                <button
-                  key={sib.applicationId}
-                  type="button"
-                  disabled={active || saving}
-                  onClick={() => {
-                    if (dirty && appMeta.status === "DRAFT") {
-                      void saveDraft()
-                        .then(() => {
-                          router.push(`/nominate/applications/${sib.applicationId}`);
-                        })
-                        .catch(() => {
-                          router.push(`/nominate/applications/${sib.applicationId}`);
-                        });
-                    } else {
-                      router.push(`/nominate/applications/${sib.applicationId}`);
-                    }
-                  }}
-                  className={`min-h-10 border px-3 py-2 text-left text-xs font-bold uppercase tracking-[0.08em] transition ${
-                    active
-                      ? "border-[#1a1814] bg-[#1a1814] text-white"
-                      : "border-black/15 bg-[#f7f4f2] text-[#333] hover:border-[#1a1814]/40"
-                  }`}
-                >
-                  {sib.categoryTitle}
-                  <span className="mt-0.5 block text-[10px] font-medium normal-case tracking-normal opacity-70">
-                    {sib.status.replaceAll("_", " ")}
-                    {active ? " · editing" : ""}
-                  </span>
-                </button>
-              );
-            })}
+          <div className="mt-4">
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[#888]">
+              Category scorecards
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {siblingApps.map((sib) => {
+                const active = sib.applicationId === appMeta.id;
+                const isDraft = sib.status === "DRAFT";
+                return (
+                  <button
+                    key={sib.applicationId}
+                    type="button"
+                    disabled={active || saving}
+                    onClick={() => {
+                      const href = `/nominate/applications/${sib.applicationId}?focus=scorecard`;
+                      if (dirty && appMeta.status === "DRAFT") {
+                        void saveDraft()
+                          .then(() => router.push(href))
+                          .catch(() => router.push(href));
+                      } else {
+                        router.push(href);
+                      }
+                    }}
+                    className={`min-h-10 border px-3 py-2 text-left text-xs font-bold uppercase tracking-[0.08em] transition ${
+                      active
+                        ? "border-[#1a1814] bg-[#1a1814] text-white"
+                        : "border-black/15 bg-[#f7f4f2] text-[#333] hover:border-[#1a1814]/40"
+                    }`}
+                  >
+                    {sib.categoryTitle}
+                    <span className="mt-0.5 block text-[10px] font-medium normal-case tracking-normal opacity-70">
+                      {isDraft
+                        ? active
+                          ? "Editing scorecard"
+                          : "Scorecard pending"
+                        : sib.status.replaceAll("_", " ")}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
 
@@ -522,7 +552,11 @@ function WorkspaceInner({
             {step === 3 && <OverviewStep answers={answers} />}
             {step === 4 && <PerformanceSection answers={answers} />}
             {step === 5 && (
-              <CategoryQuestionsSection scorecard={scorecard} answers={answers} />
+              <CategoryQuestionsSection
+                scorecard={scorecard}
+                answers={answers}
+                categoryTitle={appMeta.categoryTitle}
+              />
             )}
             {step === 6 && <MysuruStep answers={answers} />}
             {step === 7 && <SignatureStep answers={answers} />}
@@ -549,16 +583,17 @@ function WorkspaceInner({
                 onSubmitted={(status) => {
                   setAppMeta((m) => ({ ...m, status: status.replaceAll("_", " ") }));
                   setDirty(false);
+                  const nextDraft = siblingApps.find(
+                    (s) => s.applicationId !== appMeta.id && s.status === "DRAFT",
+                  );
                   setSubmitMsg(
-                    siblingApps.length > 1
-                      ? `Submitted for ${appMeta.categoryTitle}. Switch category above if you still need to submit another.`
-                      : "Application submitted — Eligibility Review",
+                    nextDraft
+                      ? `Submitted for ${appMeta.categoryTitle}. Next: complete the scorecard for ${nextDraft.categoryTitle}.`
+                      : "Nomination submitted — Eligibility Review",
                   );
                   setSiblingApps((list) =>
                     list.map((s) =>
-                      s.applicationId === appMeta.id
-                        ? { ...s, status: status }
-                        : s,
+                      s.applicationId === appMeta.id ? { ...s, status } : s,
                     ),
                   );
                 }}
@@ -623,7 +658,9 @@ export default function ApplicationWorkspacePage({
 }) {
   return (
     <AuthGate roles={["APPLICANT", "ADMINISTRATOR"]} loginPath="/nominate/login">
-      <WorkspaceInner params={params} />
+      <Suspense fallback={<p className="p-6 text-sm text-[#666]">Loading nomination…</p>}>
+        <WorkspaceInner params={params} />
+      </Suspense>
     </AuthGate>
   );
 }
@@ -926,19 +963,27 @@ function PerformanceSection({ answers }: { answers: Answers }) {
 function CategoryQuestionsSection({
   scorecard,
   answers,
+  categoryTitle,
 }: {
   scorecard: { name: string; points: number }[];
   answers: Answers;
+  categoryTitle: string;
 }) {
   return (
     <div className="mt-4 space-y-4">
+      <div className="border border-[var(--brand-gold)]/40 bg-[#faf6eb] px-4 py-3 text-sm text-[#333]">
+        <p className="font-semibold uppercase tracking-wide text-[10px] text-[var(--brand-gold-dark)]">
+          Category scorecard only
+        </p>
+        <p className="mt-1">
+          These questions are for <span className="font-semibold">{categoryTitle}</span>. Shared
+          sections (overview, performance, Mysuru, declaration) already apply to all your
+          categories — you do not fill them again.
+        </p>
+      </div>
       <p className="text-sm text-[#666]">
-        These questions are specific to this award category. Shared sections (overview, performance,
-        Mysuru, declaration) apply to all categories you selected.
-      </p>
-      <p className="text-sm text-[#666]">
-        Answer at least the first category question to continue. Other scorecard answers are
-        optional but strengthen your nomination.
+        Answer at least the first question to continue. Other scorecard answers are optional but
+        strengthen this category.
       </p>
       {scorecard.map((c, i) => {
         const name = `category_q_${i}`;
@@ -1441,9 +1486,14 @@ function ReviewSection({
   const [busy, setBusy] = useState(false);
   const [successOpen, setSuccessOpen] = useState(false);
   const [successDetail, setSuccessDetail] = useState("");
+  const [nextScorecard, setNextScorecard] = useState<{
+    applicationId: string;
+    categoryTitle: string;
+  } | null>(null);
   const [error, setError] = useState("");
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [docs, setDocs] = useState<{ name: string; fileName?: string | null }[]>([]);
+  useBodyScrollLock(busy);
   useBodyScrollLock(successOpen);
 
   useEffect(() => {
@@ -1666,10 +1716,16 @@ function ReviewSection({
             className="btn-primary"
             disabled={busy}
             onClick={async () => {
+              const draftSiblings = otherCategories.filter((c) => c.status === "DRAFT");
+              const nextDraft = draftSiblings[0] || null;
               const ok = await confirm({
                 title: "Are you sure?",
                 message: otherCategories.length
-                  ? `Submit “${categoryTitle}” for eligibility review? Shared answers were saved across your categories. After submit, switch to another category tab if you still need to submit there.`
+                  ? `Submit the “${categoryTitle}” scorecard for eligibility review? Shared organisation answers stay synced. ${
+                      nextDraft
+                        ? `Afterwards you can complete the scorecard for “${nextDraft.categoryTitle}”.`
+                        : "If another category is still in draft, open its scorecard next."
+                    }`
                   : "Submit this application for eligibility review? Your answers, declaration, and uploaded document list will be saved to the database first. After submit, major details cannot be edited unless the Awards Secretariat reopens it.",
                 confirmLabel: "Yes, submit",
                 cancelLabel: "Cancel",
@@ -1717,8 +1773,18 @@ function ReviewSection({
                   ? draftJson.documents.length
                   : 0;
                 const answerCount = Object.keys(draftJson.answers || {}).length;
+                setNextScorecard(
+                  nextDraft
+                    ? {
+                        applicationId: nextDraft.applicationId,
+                        categoryTitle: nextDraft.categoryTitle,
+                      }
+                    : null,
+                );
                 setSuccessDetail(
-                  `All details are stored. ${answerCount} form fields and ${docCount} document record${docCount === 1 ? "" : "s"} saved. Status: Eligibility Review.`,
+                  nextDraft
+                    ? `“${categoryTitle}” is in Eligibility Review. Shared answers are already on your other draft. Next: complete the scorecard for “${nextDraft.categoryTitle}” only — you do not fill the whole form again.`
+                    : `All details are stored. ${answerCount} form fields and ${docCount} document record${docCount === 1 ? "" : "s"} saved. Status: Eligibility Review.`,
                 );
                 setSuccessOpen(true);
               } catch (e) {
@@ -1754,7 +1820,7 @@ function ReviewSection({
               aria-hidden
             />
             <h2 className="mt-4 font-display text-xl font-black italic uppercase text-[#1a1814]">
-              Application submitted
+              {nextScorecard ? "Scorecard submitted" : "Application submitted"}
             </h2>
             <p className="mt-3 text-sm leading-relaxed text-[#444]">{successDetail}</p>
             <p className="mt-2 text-sm text-[#666]">
@@ -1764,9 +1830,18 @@ function ReviewSection({
               <Link href="/nominate/dashboard" className="btn-secondary text-center">
                 Go to Dashboard
               </Link>
-              <button type="button" className="btn-primary" onClick={() => setSuccessOpen(false)}>
-                OK
-              </button>
+              {nextScorecard ? (
+                <Link
+                  href={`/nominate/applications/${nextScorecard.applicationId}?focus=scorecard`}
+                  className="btn-primary text-center"
+                >
+                  Complete scorecard · {nextScorecard.categoryTitle}
+                </Link>
+              ) : (
+                <button type="button" className="btn-primary" onClick={() => setSuccessOpen(false)}>
+                  OK
+                </button>
+              )}
             </div>
           </div>
         </div>

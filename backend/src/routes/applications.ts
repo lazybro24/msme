@@ -50,6 +50,107 @@ async function siblingSharedDraftSeed(applicantId: string): Promise<Prisma.Input
   return null;
 }
 
+type DraftShape = {
+  step?: number;
+  answers?: Record<string, unknown>;
+  documents?: unknown;
+  savedAt?: string;
+};
+
+function parseDraft(raw: unknown): DraftShape {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw as DraftShape;
+  return {};
+}
+
+/** Push shared (non-scorecard) answers from one app onto other DRAFT siblings. */
+async function syncSharedAnswersToDraftSiblings(
+  applicantId: string,
+  sourceAppId: string,
+  draft: DraftShape,
+) {
+  const sharedAnswers = pickSharedAnswers(draft.answers || {});
+  if (!Object.keys(sharedAnswers).length) return;
+
+  const siblings = await prisma.application.findMany({
+    where: {
+      applicantId,
+      status: "DRAFT",
+      NOT: { id: sourceAppId },
+    },
+  });
+
+  for (const sib of siblings) {
+    const prev = parseDraft(sib.draftJson);
+    const categoryOnly = Object.fromEntries(
+      Object.entries(prev.answers || {}).filter(([k]) => k.startsWith("category_q_")),
+    );
+    const nextStep =
+      typeof prev.step === "number" && prev.step >= 5
+        ? prev.step
+        : Math.max(5, typeof draft.step === "number" ? Math.min(draft.step, 5) : 5);
+    await prisma.application.update({
+      where: { id: sib.id },
+      data: {
+        progress: Math.max(sib.progress, 45),
+        draftJson: {
+          ...prev,
+          step: nextStep,
+          answers: { ...sharedAnswers, ...categoryOnly } as Prisma.InputJsonValue,
+          documents: (draft.documents ?? prev.documents ?? null) as Prisma.InputJsonValue,
+          savedAt: draft.savedAt ?? prev.savedAt ?? new Date().toISOString(),
+        } as Prisma.InputJsonValue,
+      },
+    });
+  }
+}
+
+/** If a draft is missing shared answers, copy them from any sibling (incl. submitted). */
+async function hydrateDraftFromSiblings(app: {
+  id: string;
+  applicantId: string;
+  status: string;
+  progress: number;
+  draftJson: unknown;
+}) {
+  if (app.status !== "DRAFT") return app;
+  const draft = parseDraft(app.draftJson);
+  const answers = draft.answers || {};
+  const hasShared =
+    String(answers.overview_describe ?? "").trim().length > 0 ||
+    String(answers.decl_signatory ?? "").trim().length > 0;
+  if (hasShared) return app;
+
+  const siblings = await prisma.application.findMany({
+    where: { applicantId: app.applicantId, NOT: { id: app.id } },
+    orderBy: { updatedAt: "desc" },
+  });
+
+  for (const sib of siblings) {
+    const sibDraft = parseDraft(sib.draftJson);
+    const shared = pickSharedAnswers(sibDraft.answers || {});
+    if (Object.keys(shared).length < 2) continue;
+    const categoryOnly = Object.fromEntries(
+      Object.entries(answers).filter(([k]) => k.startsWith("category_q_")),
+    );
+    const updated = await prisma.application.update({
+      where: { id: app.id },
+      data: {
+        progress: Math.max(app.progress, 45),
+        draftJson: {
+          ...draft,
+          step: 5,
+          answers: { ...shared, ...categoryOnly } as Prisma.InputJsonValue,
+          documents: (sibDraft.documents ?? draft.documents ?? null) as Prisma.InputJsonValue,
+          savedAt: new Date().toISOString(),
+          hydratedFromSibling: true,
+        } as Prisma.InputJsonValue,
+      },
+    });
+    return updated;
+  }
+  return app;
+}
+
 const STATUSES: ApplicationStatus[] = [
   "DRAFT",
   "SUBMITTED",
@@ -102,7 +203,7 @@ applicationsRouter.get("/", requireAuth, async (req: AuthRequest, res) => {
 
 applicationsRouter.get("/:applicationId", requireAuth, async (req: AuthRequest, res) => {
   const id = String(req.params.applicationId);
-  const app = await prisma.application.findFirst({
+  let app = await prisma.application.findFirst({
     where: { OR: [{ applicationId: id }, { id }] },
   });
   if (!app) return res.status(404).json({ error: "Not found" });
@@ -114,6 +215,10 @@ applicationsRouter.get("/:applicationId", requireAuth, async (req: AuthRequest, 
   const isAssignedJury = app.assignedJuryIds.includes(user.id);
   if (!isStaff && !isOwner && !isAssignedJury) {
     return res.status(403).json({ error: "Forbidden" });
+  }
+
+  if (isOwner) {
+    app = await hydrateDraftFromSiblings(app);
   }
 
   const payload: Record<string, unknown> = {
@@ -340,47 +445,11 @@ applicationsRouter.patch("/:applicationId", requireAuth, async (req: AuthRequest
 
   // Sync shared answers to sibling category drafts (one nomination, multiple categories)
   if (data.draftJson && typeof data.draftJson === "object") {
-    const draft = data.draftJson as {
-      step?: number;
-      answers?: Record<string, unknown>;
-      documents?: unknown;
-      savedAt?: string;
-    };
-    const sharedAnswers = pickSharedAnswers(draft.answers || {});
-    if (Object.keys(sharedAnswers).length) {
-      const siblings = await prisma.application.findMany({
-        where: {
-          applicantId: app.applicantId,
-          status: "DRAFT",
-          NOT: { id: app.id },
-        },
-      });
-      for (const sib of siblings) {
-        const prev =
-          sib.draftJson && typeof sib.draftJson === "object"
-            ? (sib.draftJson as {
-                step?: number;
-                answers?: Record<string, unknown>;
-                documents?: unknown;
-                savedAt?: string;
-              })
-            : {};
-        const categoryOnly = Object.fromEntries(
-          Object.entries(prev.answers || {}).filter(([k]) => k.startsWith("category_q_")),
-        );
-        await prisma.application.update({
-          where: { id: sib.id },
-          data: {
-            draftJson: {
-              ...prev,
-              answers: { ...sharedAnswers, ...categoryOnly } as Prisma.InputJsonValue,
-              documents: (draft.documents ?? prev.documents ?? null) as Prisma.InputJsonValue,
-              savedAt: draft.savedAt ?? prev.savedAt,
-            } as Prisma.InputJsonValue,
-          },
-        });
-      }
-    }
+    await syncSharedAnswersToDraftSiblings(
+      app.applicantId,
+      app.id,
+      parseDraft(data.draftJson),
+    );
   }
 
   // Keep org-level uploads linked to this application when saving a draft
@@ -552,6 +621,11 @@ applicationsRouter.post("/:applicationId/submit", requireAuth, async (req: AuthR
       verifiedBy: null,
     },
   });
+
+  // Keep sibling drafts in sync with the shared answers just submitted
+  if (draftJson && typeof draftJson === "object") {
+    await syncSharedAnswersToDraftSiblings(app.applicantId, app.id, parseDraft(draftJson));
+  }
 
   await audit({
     actorId: req.user!.id,
