@@ -119,12 +119,14 @@ function DocumentsInner() {
     return true;
   }
 
-  function load() {
-    setLoading(true);
-    apiGet<DocsPayload>("/api/documents")
+  function load(opts?: { quiet?: boolean }) {
+    if (!opts?.quiet) setLoading(true);
+    return apiGet<DocsPayload>("/api/documents")
       .then(applyPayload)
       .catch((e) => setMsg(e instanceof Error ? e.message : "Could not load documents"))
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!opts?.quiet) setLoading(false);
+      });
   }
 
   useEffect(() => {
@@ -190,10 +192,28 @@ function DocumentsInner() {
         description: `Mandatory · ${name}`,
         file,
       });
-      await load();
+      // Drop overlay immediately so scroll unlocks; refresh list quietly
+      setBusyName("");
+      setMandatory((prev) =>
+        prev.map((m) =>
+          m.name === name
+            ? {
+                ...m,
+                done: true,
+                notAvailable: false,
+                fileName: file.name,
+                fileUrl: m.fileUrl,
+              }
+            : m,
+        ),
+      );
+      setCompleteCount((c) => {
+        const wasDone = mandatory.find((m) => m.name === name)?.done;
+        return wasDone ? c : Math.min(c + 1, mandatory.length || c + 1);
+      });
+      void load({ quiet: true });
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Upload failed");
-    } finally {
       setBusyName("");
     }
   }
@@ -207,10 +227,27 @@ function DocumentsInner() {
         evidenceType,
         ...(applicationRef ? { applicationId: applicationRef } : {}),
       });
-      await load();
+      setBusyName("");
+      setMandatory((prev) =>
+        prev.map((m) =>
+          m.name === name
+            ? {
+                ...m,
+                done: true,
+                notAvailable: true,
+                fileName: "N/A",
+                fileUrl: "na:unavailable",
+              }
+            : m,
+        ),
+      );
+      setCompleteCount((c) => {
+        const wasDone = mandatory.find((m) => m.name === name)?.done;
+        return wasDone ? c : Math.min(c + 1, mandatory.length || c + 1);
+      });
+      void load({ quiet: true });
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Could not mark as N/A");
-    } finally {
       setBusyName("");
     }
   }
@@ -240,10 +277,10 @@ function DocumentsInner() {
         file,
       });
       form.reset();
-      await load();
+      setExtraBusy(false);
+      void load({ quiet: true });
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Upload failed");
-    } finally {
       setExtraBusy(false);
     }
   }
@@ -252,7 +289,7 @@ function DocumentsInner() {
     try {
       await apiDelete(`/api/documents/${id}`);
       setMsg("Document removed.");
-      load();
+      void load({ quiet: true });
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Delete failed");
     }
@@ -261,7 +298,8 @@ function DocumentsInner() {
   const allMandatoryDone = completeCount >= mandatory.length && mandatory.length > 0;
   const missingMandatory = mandatory.filter((m) => !m.done);
   const uploading = Boolean(busyName) || extraBusy;
-  useBodyScrollLock(Boolean(sizeAlert) || uploading);
+  // Only lock for the size alert here — ProcessOverlay already locks while uploading
+  useBodyScrollLock(Boolean(sizeAlert));
 
   const { allowNextNavigation } = useUnsavedProcessGuard({
     dirty: Boolean(categoryReady) && !allMandatoryDone && !loading,

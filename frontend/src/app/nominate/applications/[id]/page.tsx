@@ -964,7 +964,8 @@ function EvidenceSection({
   const [sizeAlert, setSizeAlert] = useState<string | null>(null);
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const uploadRef = useRef<HTMLInputElement | null>(null);
-  useBodyScrollLock(Boolean(sizeAlert) || Boolean(busyKey));
+  // ProcessOverlay locks while busy; only lock here for the size alert dialog
+  useBodyScrollLock(Boolean(sizeAlert));
 
   function load() {
     apiGet<{
@@ -1055,11 +1056,11 @@ function EvidenceSection({
     setMsg("");
     try {
       await uploadFile({ name, evidenceType, file });
+      setBusyKey("");
       onChanged?.();
       load();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Upload failed");
-    } finally {
       setBusyKey("");
     }
   }
@@ -1073,11 +1074,18 @@ function EvidenceSection({
         evidenceType,
         applicationId,
       });
+      setBusyKey("");
+      setDocs((prev) =>
+        prev.map((d) =>
+          (d.id || d.name) === key || d.name === name
+            ? { ...d, done: true, fileName: "N/A" }
+            : d,
+        ),
+      );
       onChanged?.();
       load();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Could not mark as N/A");
-    } finally {
       setBusyKey("");
     }
   }

@@ -225,11 +225,10 @@ documentsRouter.post(
           ],
         },
       });
+      const staleRefs = existing
+        .map((e) => parseFileRef(e.fileUrl))
+        .filter((r): r is NonNullable<typeof r> => Boolean(r));
       if (existing.length) {
-        for (const e of existing) {
-          const ref = parseFileRef(e.fileUrl);
-          if (ref) await deleteStoredFile(ref.kind, ref.filename);
-        }
         await prisma.document.deleteMany({
           where: { id: { in: existing.map((e) => e.id) } },
         });
@@ -248,6 +247,13 @@ documentsRouter.post(
           applicationId,
         },
       });
+
+      // Purge old files in background — don't block N/A response on R2 latency
+      if (staleRefs.length) {
+        void Promise.allSettled(
+          staleRefs.map((ref) => deleteStoredFile(ref.kind, ref.filename)),
+        );
+      }
 
       res.status(201).json({ document: mapDoc(doc), message: "Marked not available" });
     } catch (e) {
