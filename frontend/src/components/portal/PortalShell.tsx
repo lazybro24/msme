@@ -402,6 +402,9 @@ function PortalShellBody({
   const accountId = headerUser?.id
     ? headerUser.id.slice(-8).toUpperCase()
     : "—";
+  const displayMeta = [headerUser?.designation, headerUser?.orgName, headerUser?.mobile]
+    .filter(Boolean)
+    .join(" · ");
 
   async function changePassword(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
