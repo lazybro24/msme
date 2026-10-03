@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, use, useEffect, useMemo, useState } from "react";
 import { PortalShell, StatusPill, secretariatNav } from "@/components/portal/PortalShell";
 import { AuthGate } from "@/components/portal/AuthGate";

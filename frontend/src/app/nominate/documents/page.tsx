@@ -9,7 +9,7 @@ import { IncompleteGateDialog } from "@/components/portal/IncompleteGate";
 import { useUnsavedProcessGuard } from "@/hooks/UnsavedProcessContext";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { ProcessOverlay } from "@/components/ui/ProcessOverlay";
-import { apiDelete, apiGet, getToken, getStoredUser, API_URL } from "@/lib/api";
+import { apiDelete, apiGet, apiPost, getToken, getStoredUser, API_URL } from "@/lib/api";
 import { authFileUrl } from "@/lib/files";
 
 const MAX_UPLOAD_MB = 5;
@@ -56,6 +56,7 @@ type MandatoryItem = {
   documentId: string | null;
   fileUrl: string | null;
   fileName?: string | null;
+  notAvailable?: boolean;
 };
 
 type DocsPayload = {
@@ -197,6 +198,23 @@ function DocumentsInner() {
     }
   }
 
+  async function markMandatoryNa(name: string, evidenceType: string) {
+    setBusyName(name);
+    setMsg("");
+    try {
+      await apiPost("/api/documents/na", {
+        name,
+        evidenceType,
+        ...(applicationRef ? { applicationId: applicationRef } : {}),
+      });
+      await load();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Could not mark as N/A");
+    } finally {
+      setBusyName("");
+    }
+  }
+
   async function onAddExtra(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = e.currentTarget;
@@ -274,15 +292,11 @@ function DocumentsInner() {
         missingCount={missingMandatory.length}
         title="Required documents incomplete"
         allowSkip={false}
-        message={`${missingMandatory.length} mandatory document${missingMandatory.length === 1 ? "" : "s"} still missing. Please upload all required documents before continuing. Incomplete uploads are highlighted in red.`}
+        message={`${missingMandatory.length} document${missingMandatory.length === 1 ? "" : "s"} still pending. Upload a file or mark N/A before continuing.`}
         onStay={() => setIncompleteOpen(false)}
       />
 
-      <ProcessOverlay
-        open={uploading}
-        title="Saving document…"
-        message="Uploading and saving this file to the database. Please wait."
-      />
+      <ProcessOverlay open={uploading} />
 
       {sizeAlert && (
         <div
@@ -335,13 +349,12 @@ function DocumentsInner() {
             <div className="text-center sm:text-left">
               <h1 className="font-display text-3xl font-black italic uppercase">Documents</h1>
               <p className="mt-2 text-sm text-[#666]">
-                Upload mandatory proof documents (max {MAX_UPLOAD_MB} MB each). These appear to jury
-                under Supporting Evidence after verification.
+                Upload proof documents (max {MAX_UPLOAD_MB} MB each), or mark{" "}
+                <span className="font-semibold">N/A</span> if a document is not available.
               </p>
               <p className="mt-2 text-xs text-[#666]">
-                Tip: If you are not GST-registered, upload a short signed note stating that under
-                <span className="font-semibold"> GST Certificate</span>. Keep Udyam and PAN ready —
-                those are always required.
+                Tip: Udyam and PAN strengthen verification. Use N/A only when you truly cannot provide
+                a document.
               </p>
             </div>
             <button
@@ -349,7 +362,7 @@ function DocumentsInner() {
               className="btn-primary shrink-0 self-center sm:self-auto"
               onClick={tryContinue}
             >
-              Continue to nomination form →
+              Next step →
             </button>
           </div>
 
@@ -361,9 +374,9 @@ function DocumentsInner() {
 
           <div className="mt-8 grid gap-6 lg:grid-cols-2">
             <div className="border border-black/10 bg-white p-5 sm:p-6">
-              <h2 className="font-display text-2xl font-black italic uppercase">Mandatory Documents</h2>
+              <h2 className="font-display text-2xl font-black italic uppercase">Required Documents</h2>
               <p className="mt-1 text-sm text-[#666]">
-                {completeCount} / {mandatory.length} complete
+                {completeCount} / {mandatory.length} complete · Upload or mark N/A
               </p>
               {loading ? (
                 <p className="mt-4 text-sm text-[#666]">Loading…</p>
@@ -371,6 +384,9 @@ function DocumentsInner() {
                 <ul className="mt-4 space-y-2 text-sm">
                   {mandatory.map((m) => {
                     const meta = mandatoryDefaults.find((d) => d.name === m.name);
+                    const isNa =
+                      m.notAvailable || m.fileName === "N/A" || Boolean(m.fileUrl?.startsWith("na:"));
+                    const canView = Boolean(m.fileUrl && !m.fileUrl.startsWith("na:"));
                     return (
                       <li
                         key={m.name}
@@ -385,8 +401,8 @@ function DocumentsInner() {
                           <p className="mt-0.5 text-xs">
                             {m.done ? (
                               <span className="font-semibold text-[var(--brand-gold-dark)]">
-                                Uploaded
-                                {m.fileName ? (
+                                {isNa ? "Marked N/A" : "Uploaded"}
+                                {!isNa && m.fileName ? (
                                   <span className="font-medium text-[#555]"> · {m.fileName}</span>
                                 ) : null}
                               </span>
@@ -398,7 +414,7 @@ function DocumentsInner() {
                           </p>
                         </div>
                         <div className="flex shrink-0 items-center gap-2">
-                          {m.fileUrl && (
+                          {canView && (
                             <a
                               href={fileHref(m.fileUrl)}
                               target="_blank"
@@ -418,8 +434,20 @@ function DocumentsInner() {
                               Remove
                             </button>
                           )}
+                          {!isNa && (
+                            <button
+                              type="button"
+                              className="btn-ghost !min-h-8 !px-2 !text-[10px]"
+                              disabled={busyName === m.name}
+                              onClick={() =>
+                                void markMandatoryNa(m.name, meta?.evidenceType || "Statutory")
+                              }
+                            >
+                              N/A
+                            </button>
+                          )}
                           <label className="btn-secondary !min-h-8 cursor-pointer !px-2 !text-[10px]">
-                            {busyName === m.name ? "Uploading…" : m.done ? "Replace" : "Upload"}
+                            {busyName === m.name ? "…" : m.done && !isNa ? "Replace" : "Upload"}
                             <input
                               ref={(el) => {
                                 fileRefs.current[m.name] = el;
@@ -470,11 +498,11 @@ function DocumentsInner() {
                 </div>
                 <div>
                   <label className="label">Period</label>
-                  <input className="input" name="period" placeholder="e.g. FY-1 / 2025" required />
+                  <input className="input" name="period" placeholder="e.g. FY-1 / 2025" />
                 </div>
                 <div>
                   <label className="label">Short Description</label>
-                  <textarea className="input min-h-20" name="description" required />
+                  <textarea className="input min-h-20" name="description" />
                 </div>
                 <div>
                   <label className="label">Visibility</label>
@@ -524,7 +552,7 @@ function DocumentsInner() {
                     {d.description && <p className="mt-1 text-[#555]">{d.description}</p>}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    {d.fileUrl && (
+                    {d.fileUrl && !d.fileUrl.startsWith("na:") && (
                       <a
                         href={fileHref(d.fileUrl)}
                         target="_blank"
@@ -553,11 +581,12 @@ function DocumentsInner() {
           <div className="mt-8 flex flex-col items-center gap-2 sm:flex-row sm:justify-end">
             {!allMandatoryDone && (
               <p className="text-center text-sm text-[#666] sm:mr-auto sm:text-left">
-                {missingMandatory.length} of {mandatory.length} mandatory documents still pending.
+                {missingMandatory.length} of {mandatory.length} documents still pending (upload or
+                mark N/A).
               </p>
             )}
             <button type="button" className="btn-primary" onClick={tryContinue}>
-              Continue to Review & Submit →
+              Next step →
             </button>
           </div>
         </>

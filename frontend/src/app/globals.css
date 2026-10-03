@@ -878,6 +878,35 @@ a.feature-tile:hover {
   transform: none;
   }
 
+.btn-draft {
+  display: inline-flex;
+  min-height: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 2px;
+  border: 1px solid #c4b8a8;
+  padding: 0.55rem 1.15rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #5c5348;
+  background: #f3efe8;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.btn-draft:hover:not(:disabled) {
+  background: #ebe4d8;
+  border-color: #a89880;
+  color: #3d362c;
+}
+
+.btn-draft:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
   .btn-secondary {
   display: inline-flex;
   min-height: 2.5rem;

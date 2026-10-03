@@ -42,6 +42,14 @@ function matchesMandatory(docName: string, mandatoryName: string) {
   return hits >= Math.min(2, bWords.length);
 }
 
+/** Uploaded file or explicitly marked not available. */
+function isDocumentSatisfied(d: { fileUrl: string | null; fileName?: string | null }) {
+  if (!d) return false;
+  if (d.fileName === "N/A") return true;
+  if (d.fileUrl && (d.fileUrl.startsWith("na:") || d.fileUrl === "na")) return true;
+  return Boolean(d.fileUrl);
+}
+
 function mapDoc(d: {
   id: string;
   name: string;
@@ -104,13 +112,16 @@ documentsRouter.get(
 
     const mandatoryNames = await getMandatoryNames();
     const mandatory = mandatoryNames.map((name) => {
-      const match = docs.find((d) => matchesMandatory(d.name, name) && d.fileUrl);
+      const match = docs.find((d) => matchesMandatory(d.name, name) && isDocumentSatisfied(d));
       return {
         name,
         done: Boolean(match),
         documentId: match?.id ?? null,
         fileUrl: match?.fileUrl ?? null,
         fileName: match?.fileName ?? null,
+        notAvailable: Boolean(
+          match && (match.fileName === "N/A" || (match.fileUrl && match.fileUrl.startsWith("na:"))),
+        ),
       };
     });
 
@@ -151,13 +162,16 @@ documentsRouter.get(
 
     const mandatoryNames = await getMandatoryNames();
     const mandatory = mandatoryNames.map((name) => {
-      const match = docs.find((d) => matchesMandatory(d.name, name) && d.fileUrl);
+      const match = docs.find((d) => matchesMandatory(d.name, name) && isDocumentSatisfied(d));
       return {
         name,
         done: Boolean(match),
         documentId: match?.id ?? null,
         fileUrl: match?.fileUrl ?? null,
         fileName: match?.fileName ?? null,
+        notAvailable: Boolean(
+          match && (match.fileName === "N/A" || (match.fileUrl && match.fileUrl.startsWith("na:"))),
+        ),
       };
     });
 
@@ -169,6 +183,78 @@ documentsRouter.get(
       completeCount: mandatory.filter((m) => m.done).length,
       totalMandatory: mandatory.length,
     });
+  },
+);
+
+documentsRouter.post(
+  "/na",
+  requireAuth,
+  requireRoles("APPLICANT", "ADMINISTRATOR"),
+  async (req: AuthRequest, res) => {
+    try {
+      const user = req.user!;
+      const { org, apps } = await applicantScope(user.id);
+      if (!org && !apps.length) {
+        return res.status(400).json({
+          error: "Complete your business profile before updating documents",
+        });
+      }
+
+      const name = String(req.body?.name || "").trim();
+      const evidenceType = String(req.body?.evidenceType || req.body?.type || "Other").trim();
+      const applicationRef = String(req.body?.applicationId || "").trim();
+      if (!name) return res.status(400).json({ error: "Document name is required" });
+
+      let applicationId: string | null = null;
+      if (applicationRef) {
+        const app = apps.find(
+          (a) => a.id === applicationRef || a.applicationId === applicationRef,
+        );
+        if (!app) return res.status(400).json({ error: "Invalid application" });
+        applicationId = app.id;
+      } else if (apps[0]) {
+        applicationId = apps[0].id;
+      }
+
+      const existing = await prisma.document.findMany({
+        where: {
+          name,
+          OR: [
+            ...(org ? [{ organisationId: org.id }] : []),
+            ...(applicationId ? [{ applicationId }] : []),
+          ],
+        },
+      });
+      if (existing.length) {
+        for (const e of existing) {
+          const ref = parseFileRef(e.fileUrl);
+          if (ref) await deleteStoredFile(ref.kind, ref.filename);
+        }
+        await prisma.document.deleteMany({
+          where: { id: { in: existing.map((e) => e.id) } },
+        });
+      }
+
+      const doc = await prisma.document.create({
+        data: {
+          name,
+          evidenceType,
+          period: "N/A",
+          description: "Marked not available by applicant",
+          visibility: "Confidential",
+          fileUrl: "na:unavailable",
+          fileName: "N/A",
+          organisationId: org?.id ?? null,
+          applicationId,
+        },
+      });
+
+      res.status(201).json({ document: mapDoc(doc), message: "Marked not available" });
+    } catch (e) {
+      res.status(500).json({
+        error: e instanceof Error ? e.message : "Could not mark document as N/A",
+      });
+    }
   },
 );
 

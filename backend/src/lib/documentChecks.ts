@@ -30,6 +30,13 @@ function matchesMandatory(docName: string, mandatoryName: string) {
   return bWords.every((w) => aWords.has(w));
 }
 
+function isDocumentSatisfied(d: { fileUrl: string | null; fileName?: string | null }) {
+  if (!d) return false;
+  if (d.fileName === "N/A") return true;
+  if (d.fileUrl && (d.fileUrl.startsWith("na:") || d.fileUrl === "na")) return true;
+  return Boolean(d.fileUrl);
+}
+
 export async function getMandatoryDocumentStatus(applicantId: string, applicationCuid?: string) {
   const org = await prisma.organisation.findUnique({ where: { ownerId: applicantId } });
   const apps = await prisma.application.findMany({
@@ -52,7 +59,7 @@ export async function getMandatoryDocumentStatus(applicantId: string, applicatio
   const missing: string[] = [];
   let completeCount = 0;
   for (const name of mandatoryNames) {
-    const match = docs.find((d) => matchesMandatory(d.name, name) && d.fileUrl);
+    const match = docs.find((d) => matchesMandatory(d.name, name) && isDocumentSatisfied(d));
     if (match) completeCount += 1;
     else missing.push(name);
   }

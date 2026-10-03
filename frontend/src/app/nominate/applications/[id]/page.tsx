@@ -346,6 +346,7 @@ function WorkspaceInner({
         allowSkip={false}
         onStay={() => setIncompleteOpen(false)}
       />
+      <ProcessOverlay open={saving} />
 
       <div className="mb-6 border border-black/10 bg-white p-5 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -481,10 +482,10 @@ function WorkspaceInner({
                 {incompleteBanner}
               </p>
             )}
-            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <button
                 type="button"
-                className="btn-secondary w-full sm:w-auto"
+                className="btn-ghost order-3 w-full sm:order-1 sm:w-auto"
                 onClick={() => {
                   const partial = collectStepAnswers();
                   mergeAnswers(partial);
@@ -492,25 +493,31 @@ function WorkspaceInner({
                 }}
                 disabled={step === 1}
               >
-                Back
+                ← Back
               </button>
-              {dirty && appMeta.status === "DRAFT" && (
-                <button
-                  type="button"
-                  className="btn-primary w-full sm:w-auto"
-                  disabled={saving}
-                  onClick={() => {
-                    void confirmAndSaveDraft();
-                  }}
-                >
-                  {saving ? "Saving…" : "Save Draft"}
-                </button>
-              )}
-              {step < applicationSteps.length && (
-                <button type="button" className="btn-secondary w-full sm:w-auto" onClick={saveContinue}>
-                  Continue
-                </button>
-              )}
+              <div className="order-1 flex flex-col gap-2 sm:order-2 sm:flex-row sm:items-center">
+                {appMeta.status === "DRAFT" && (
+                  <button
+                    type="button"
+                    className="btn-draft w-full sm:w-auto"
+                    disabled={saving || !dirty}
+                    onClick={() => {
+                      void confirmAndSaveDraft();
+                    }}
+                  >
+                    {saving ? "Saving…" : "Save for later"}
+                  </button>
+                )}
+                {step < applicationSteps.length && (
+                  <button
+                    type="button"
+                    className="btn-primary w-full sm:w-auto"
+                    onClick={saveContinue}
+                  >
+                    Next step →
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -652,6 +659,10 @@ function EligibilityStep({ answers }: { answers: Answers }) {
 function OverviewStep({ answers }: { answers: Answers }) {
   return (
     <div className="mt-4 space-y-4">
+      <p className="text-sm text-[#666]">
+        Fields marked <span className="font-semibold text-[#1a1814]">*</span> are required. Other
+        answers help the jury but can be filled later.
+      </p>
       <TextBlock
         name="overview_describe"
         title="Describe your business"
@@ -664,28 +675,24 @@ function OverviewStep({ answers }: { answers: Answers }) {
         title="Principal products or services"
         max="150 words"
         defaultValue={answers.overview_products}
-        required
       />
       <TextBlock
         name="overview_customers"
         title="Principal customers or markets"
         max="150 words"
         defaultValue={answers.overview_customers}
-        required
       />
       <TextBlock
         name="overview_differentiates"
         title="What differentiates your organisation?"
         max="200 words"
         defaultValue={answers.overview_differentiates}
-        required
       />
       <TextBlock
         name="overview_achievements"
         title="Three most important achievements"
         max="200 words"
         defaultValue={answers.overview_achievements}
-        required
       />
     </div>
   );
@@ -706,6 +713,9 @@ function PerformanceSection({ answers }: { answers: Answers }) {
       <div className="mb-3 bg-black px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--brand-gold)]">
         Confidential — Jury & Verification Use Only
       </div>
+      <p className="mb-3 text-sm text-[#666]">
+        Only the latest year (FY-1) for Revenue is required. Fill other cells if you have them.
+      </p>
       <div className="overflow-x-auto">
         <table className="min-w-[640px] w-full text-left text-sm">
           <thead>
@@ -768,14 +778,18 @@ function CategoryQuestionsSection({
   return (
     <div className="mt-4 space-y-4">
       <p className="text-sm text-[#666]">
-        Each question maps to the evaluation scorecard so you know what the jury assesses.
+        Answer at least the first category question to continue. Other scorecard answers are
+        optional but strengthen your nomination.
       </p>
       {scorecard.map((c, i) => {
         const name = `category_q_${i}`;
         return (
           <div key={c.name} className="border border-black/10 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="font-display text-sm font-bold uppercase tracking-tight">{c.name}</h3>
+              <h3 className="font-display text-sm font-bold uppercase tracking-tight">
+                {c.name}
+                {i === 0 ? " *" : ""}
+              </h3>
               <span className="badge-gold">{c.points} Points</span>
             </div>
             <textarea
@@ -783,7 +797,7 @@ function CategoryQuestionsSection({
               className="input mt-3 min-h-24"
               placeholder="Describe evidence-backed performance (max 300 words)"
               defaultValue={answers[name] || ""}
-              required
+              required={i === 0}
             />
           </div>
         );
@@ -812,18 +826,18 @@ function MysuruStep({ answers }: { answers: Answers }) {
         defaultValue={answers.mysuru_contribution}
         required
       />
+      <p className="text-sm text-[#666]">Optional detail fields — fill what applies.</p>
       <div className="grid gap-3 sm:grid-cols-2">
         {fields.map(([name, label]) => (
           <div key={name}>
             <label className="label" htmlFor={name}>
-              {label} *
+              {label}
             </label>
             <input
               id={name}
               name={name}
               className="input"
               defaultValue={answers[name] || ""}
-              required
             />
           </div>
         ))}
@@ -847,7 +861,6 @@ function SignatureStep({ answers }: { answers: Answers }) {
         title="Why does this achievement matter?"
         max="100 words"
         defaultValue={answers.signature_why}
-        required
       />
     </div>
   );
@@ -966,13 +979,27 @@ function EvidenceSection({
     }
   }
 
+  async function markNa(key: string, name: string, evidenceType: string) {
+    setBusyKey(key);
+    setMsg("");
+    try {
+      await apiPost("/api/documents/na", {
+        name,
+        evidenceType,
+        applicationId,
+      });
+      onChanged?.();
+      load();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Could not mark as N/A");
+    } finally {
+      setBusyKey("");
+    }
+  }
+
   return (
     <div className="mt-4 space-y-4">
-      <ProcessOverlay
-        open={Boolean(busyKey)}
-        title="Saving document…"
-        message="Uploading and saving this file to the database. Please wait."
-      />
+      <ProcessOverlay open={Boolean(busyKey)} />
       {sizeAlert && (
         <div
           className="fixed inset-0 z-[120] flex items-center justify-center overflow-y-auto overscroll-none bg-[#1a1814]/45 p-4 backdrop-blur-[2px]"
@@ -1001,8 +1028,9 @@ function EvidenceSection({
       )}
 
       <p className="text-sm text-[#666]">
-        Link each claim to a document: Claim → Evidence → Jury Score. Replace opens a file picker
-        (max {MAX_UPLOAD_MB} MB).
+        Link each claim to a document: Claim → Evidence → Jury Score. Use{" "}
+        <span className="font-semibold">N/A</span> if a document is not available. Max{" "}
+        {MAX_UPLOAD_MB} MB per file.
       </p>
       {msg && (
         <p className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">{msg}</p>
@@ -1010,6 +1038,7 @@ function EvidenceSection({
       {docs.map((d) => {
         const key = d.id || d.name;
         const busy = busyKey === key;
+        const isNa = d.fileName === "N/A";
         return (
           <div
             key={key}
@@ -1019,26 +1048,44 @@ function EvidenceSection({
               <p className="font-medium">{d.name}</p>
               <p className="text-xs text-[#666]">
                 {d.evidenceType} · Confidential
-                {d.fileName ? ` · ${d.fileName}` : d.done === false ? " · Pending" : ""}
+                {isNa
+                  ? " · Marked N/A"
+                  : d.fileName
+                    ? ` · ${d.fileName}`
+                    : d.done === false
+                      ? " · Pending"
+                      : ""}
               </p>
             </div>
-            <label className="btn-ghost cursor-pointer !min-h-8 !px-2 !text-[10px]">
-              {busy ? "Uploading…" : d.done === false || !d.fileName ? "Upload" : "Replace"}
-              <input
-                ref={(el) => {
-                  fileRefs.current[key] = el;
-                }}
-                type="file"
-                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                className="sr-only"
-                disabled={busy}
-                onChange={(e) => {
-                  const file = e.target.files?.[0] ?? null;
-                  e.target.value = "";
-                  void onPickFile(key, d.name, d.evidenceType || "Other", file);
-                }}
-              />
-            </label>
+            <div className="flex shrink-0 items-center gap-2">
+              {!isNa && (
+                <button
+                  type="button"
+                  className="btn-ghost !min-h-8 !px-2 !text-[10px]"
+                  disabled={busy}
+                  onClick={() => void markNa(key, d.name, d.evidenceType || "Other")}
+                >
+                  N/A
+                </button>
+              )}
+              <label className="btn-ghost cursor-pointer !min-h-8 !px-2 !text-[10px]">
+                {busy ? "…" : isNa || d.done === false || !d.fileName ? "Upload" : "Replace"}
+                <input
+                  ref={(el) => {
+                    fileRefs.current[key] = el;
+                  }}
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                  className="sr-only"
+                  disabled={busy}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] ?? null;
+                    e.target.value = "";
+                    void onPickFile(key, d.name, d.evidenceType || "Other", file);
+                  }}
+                />
+              </label>
+            </div>
           </div>
         );
       })}
@@ -1124,26 +1171,24 @@ function DeclarationSection({ answers }: { answers: Answers }) {
         </div>
         <div>
           <label className="label" htmlFor="decl_designation">
-            Designation *
+            Designation
           </label>
           <input
             id="decl_designation"
             name="decl_designation"
             className="input"
             defaultValue={answers.decl_designation || ""}
-            required
           />
         </div>
         <div>
           <label className="label" htmlFor="decl_place">
-            Place *
+            Place
           </label>
           <input
             id="decl_place"
             name="decl_place"
             className="input"
             defaultValue={answers.decl_place || ""}
-            required
           />
         </div>
         <div>
@@ -1197,7 +1242,6 @@ function ReviewSection({
   onSubmitted: (status: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const [loaderMsg, setLoaderMsg] = useState("");
   const [successOpen, setSuccessOpen] = useState(false);
   const [successDetail, setSuccessDetail] = useState("");
   const [error, setError] = useState("");
@@ -1426,7 +1470,6 @@ function ReviewSection({
               if (!ok) return;
               setBusy(true);
               setError("");
-              setLoaderMsg("Checking your answers and documents…");
               try {
                 const draftJson = await buildSubmitPayload();
                 const missing = missingNominationFields(
@@ -1438,7 +1481,6 @@ function ReviewSection({
                     `Please complete all sections before submit. Still missing: ${missing.slice(0, 5).join(", ")}${missing.length > 5 ? "…" : ""}`,
                   );
                   setBusy(false);
-                  setLoaderMsg("");
                   return;
                 }
                 const docsCheck = await apiGet<{
@@ -1454,13 +1496,11 @@ function ReviewSection({
                     .filter((m) => !m.done)
                     .map((m) => m.name);
                   setError(
-                    `Upload all mandatory documents first (${docsCheck.completeCount}/${docsCheck.totalMandatory}). Missing: ${pending.join(", ")}`,
+                    `Complete remaining documents first (${docsCheck.completeCount}/${docsCheck.totalMandatory}). Pending: ${pending.join(", ")}. Upload a file or mark N/A.`,
                   );
                   setBusy(false);
-                  setLoaderMsg("");
                   return;
                 }
-                setLoaderMsg("Confirming submission in the database…");
                 const res = await apiPost<{ application: { status: string } }>(
                   `/api/applications/${applicationId}/submit`,
                   { draftJson },
@@ -1478,7 +1518,6 @@ function ReviewSection({
                 setError(e instanceof Error ? e.message : "Submit failed — nothing was finalized");
               } finally {
                 setBusy(false);
-                setLoaderMsg("");
               }
             }}
           >
@@ -1487,13 +1526,7 @@ function ReviewSection({
         )}
       </div>
 
-      {busy && (
-        <ProcessOverlay
-          open={busy}
-          title="Saving…"
-          message={loaderMsg || "Please wait while we store your submission in the database."}
-        />
-      )}
+      {busy && <ProcessOverlay open={busy} />}
 
       {successOpen && (
         <div

@@ -1,5 +1,5 @@
 /**
- * Nomination answer completeness (mirrors frontend/src/lib/nominationCompleteness.ts).
+ * Nomination answer completeness (mirrors frontend — important fields only).
  */
 
 type AnswersMap = Record<string, unknown>;
@@ -14,7 +14,7 @@ function yes(answers: AnswersMap, key: string) {
 
 export function missingNominationFields(
   answers: AnswersMap,
-  categoryQuestionCount: number,
+  _categoryQuestionCount: number,
 ): string[] {
   const missing: string[] = [];
 
@@ -22,44 +22,12 @@ export function missingNominationFields(
     if (!yes(answers, `eligibility_${i}`)) missing.push(`Eligibility confirmation ${i + 1}`);
   }
 
-  const overview: [string, string][] = [
-    ["overview_describe", "Business description"],
-    ["overview_products", "Products / services"],
-    ["overview_customers", "Customers / markets"],
-    ["overview_differentiates", "Differentiation"],
-    ["overview_achievements", "Achievements"],
-  ];
-  for (const [k, label] of overview) {
-    if (!filled(answers, k)) missing.push(label);
-  }
-
-  const metrics = ["Revenue", "Profit / EBITDA", "Employees", "Customers / Clients", "Locations / Markets"];
-  for (let mi = 0; mi < metrics.length; mi++) {
-    if (!filled(answers, `perf_m${mi}_y2`)) missing.push(`${metrics[mi]} (FY-1)`);
-  }
-
-  for (let i = 0; i < Math.max(0, categoryQuestionCount); i++) {
-    if (!filled(answers, `category_q_${i}`)) missing.push(`Category question ${i + 1}`);
-  }
-
-  const mysuru: [string, string][] = [
-    ["mysuru_contribution", "Mysuru contribution"],
-    ["mysuru_employees", "Mysuru employees"],
-    ["mysuru_vendors", "Local vendors"],
-    ["mysuru_sourcing", "Local sourcing"],
-    ["mysuru_employment", "Local employment"],
-    ["mysuru_community", "Community contribution"],
-    ["mysuru_ecosystem", "Mysuru ecosystem"],
-  ];
-  for (const [k, label] of mysuru) {
-    if (!filled(answers, k)) missing.push(label);
-  }
-
+  if (!filled(answers, "overview_describe")) missing.push("Business description");
+  if (!filled(answers, "perf_m0_y2")) missing.push("Revenue (FY-1)");
+  if (!filled(answers, "category_q_0")) missing.push("First category question");
+  if (!filled(answers, "mysuru_contribution")) missing.push("Mysuru contribution");
   if (!filled(answers, "signature_achievement")) missing.push("Signature achievement");
-  if (!filled(answers, "signature_why")) missing.push("Why achievement matters");
   if (!filled(answers, "decl_signatory")) missing.push("Declaration signatory");
-  if (!filled(answers, "decl_designation")) missing.push("Declaration designation");
-  if (!filled(answers, "decl_place")) missing.push("Declaration place");
   if (!filled(answers, "decl_date")) missing.push("Declaration date");
   if (!yes(answers, "decl_agree")) missing.push("Declaration agreement");
 
