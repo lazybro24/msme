@@ -330,7 +330,11 @@ function DocumentsInner() {
         missingCount={missingMandatory.length}
         title="Required documents incomplete"
         allowSkip={false}
-        message={`${missingMandatory.length} document${missingMandatory.length === 1 ? "" : "s"} still pending. Upload a file or mark N/A before continuing.`}
+        message={
+          missingMandatory.length === 1
+            ? "1 document still needs action. If you have the file, upload it. If it is not available, tap N/A."
+            : `${missingMandatory.length} documents still need action. Upload each file you have, or mark N/A if it is not available.`
+        }
         onStay={() => setIncompleteOpen(false)}
       />
 
@@ -387,12 +391,12 @@ function DocumentsInner() {
             <div className="text-center sm:text-left">
               <h1 className="font-display text-3xl font-black italic uppercase">Documents</h1>
               <p className="mt-2 text-sm text-[#666]">
-                Upload proof documents (max {MAX_UPLOAD_MB} MB each), or mark{" "}
-                <span className="font-semibold">N/A</span> if a document is not available.
+                For each document: upload the file if you have it. If it is not available, mark{" "}
+                <span className="font-semibold">N/A</span> instead.
               </p>
               <p className="mt-2 text-xs text-[#666]">
-                Tip: Udyam and PAN strengthen verification. Use N/A only when you truly cannot provide
-                a document.
+                Tip: Prefer uploading Udyam and PAN when you can — use N/A only when you truly cannot
+                provide a document.
               </p>
             </div>
             <button
@@ -619,8 +623,9 @@ function DocumentsInner() {
           <div className="mt-8 flex flex-col items-center gap-2 sm:flex-row sm:justify-end">
             {!allMandatoryDone && (
               <p className="text-center text-sm text-[#666] sm:mr-auto sm:text-left">
-                {missingMandatory.length} of {mandatory.length} documents still pending (upload or
-                mark N/A).
+                {missingMandatory.length} of {mandatory.length} still need action — upload the
+                document if you have it, or mark <span className="font-semibold">N/A</span> if it is
+                not available.
               </p>
             )}
             <button type="button" className="btn-primary" onClick={tryContinue}>

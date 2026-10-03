@@ -12,9 +12,9 @@ import {
 } from "@/components/portal/PortalShell";
 import { AuthGate } from "@/components/portal/AuthGate";
 import { useConfirm } from "@/components/portal/ConfirmDialog";
-import { apiGet, apiDelete, getStoredUser, clearSession } from "@/lib/api";
-import { useRouter } from "next/navigation";
+import { apiGet, apiDelete, apiPost, getStoredUser, type AuthUser } from "@/lib/api";
 import { SkeletonStatRow, SkeletonCard } from "@/components/ui/Skeleton";
+import { PasswordField } from "@/components/ui/PasswordField";
 
 type App = {
   applicationId: string;
@@ -85,19 +85,23 @@ type WorkflowStep = {
 };
 
 function DashboardInner() {
-  const router = useRouter();
   const user = getStoredUser();
   const { confirm, dialog: confirmDialog } = useConfirm();
   const [apps, setApps] = useState<App[]>([]);
   const [notes, setNotes] = useState<{ id: string; title: string; body: string; read: boolean }[]>(
     [],
   );
+  const [account, setAccount] = useState<AuthUser | null>(user);
   const [profileComplete, setProfileComplete] = useState(false);
   const [docsComplete, setDocsComplete] = useState(0);
   const [docsTotal, setDocsTotal] = useState(7);
   const [clarificationCount, setClarificationCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [pwBusy, setPwBusy] = useState(false);
+  const [pwMsg, setPwMsg] = useState("");
+  const [pwError, setPwError] = useState("");
+  const [showPwForm, setShowPwForm] = useState(false);
 
   function loadApps() {
     return apiGet<{ applications: App[] }>("/api/applications")
@@ -126,12 +130,44 @@ function DashboardInner() {
           setDocsComplete(0);
           setDocsTotal(7);
         }),
+      apiGet<{ user: AuthUser }>("/api/auth/me")
+        .then((d) => setAccount(d.user))
+        .catch(() => setAccount(getStoredUser())),
     ]).finally(() => setLoading(false));
 
     apiGet<{ clarifications: { id: string }[] }>("/api/clarifications")
       .then((d) => setClarificationCount(d.clarifications.length))
       .catch(() => setClarificationCount(0));
   }, []);
+
+  async function changePassword(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const currentPassword = String(fd.get("currentPassword") || "");
+    const newPassword = String(fd.get("newPassword") || "");
+    const confirmPassword = String(fd.get("confirmPassword") || "");
+    setPwError("");
+    setPwMsg("");
+    if (newPassword.length < 8) {
+      setPwError("New password must be at least 8 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPwError("New password and confirmation do not match.");
+      return;
+    }
+    setPwBusy(true);
+    try {
+      await apiPost("/api/auth/change-password", { currentPassword, newPassword });
+      setPwMsg("Password updated.");
+      e.currentTarget.reset();
+      setShowPwForm(false);
+    } catch (err) {
+      setPwError(err instanceof Error ? err.message : "Could not update password");
+    } finally {
+      setPwBusy(false);
+    }
+  }
 
   function canDeleteApp(app: App) {
     if (app.adminDecision === "ACCEPTED") return false;
@@ -253,7 +289,7 @@ function DashboardInner() {
       brand="Applicant Portal"
       subtitle={`Welcome, ${user?.fullName ?? "Applicant"}`}
       nav={applicantNav}
-      userLabel={user?.orgName ?? "Applicant"}
+      userLabel={account?.fullName || user?.fullName || "Applicant"}
     >
       {confirmDialog}
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -272,18 +308,104 @@ function DashboardInner() {
           <Link href={nextHref} className="btn-primary">
             {nextLabel}
           </Link>
-          <button
-            type="button"
-            className="btn-ghost"
-            onClick={() => {
-              clearSession();
-              router.push("/nominate/login");
-            }}
-          >
-            Logout
-          </button>
         </div>
       </div>
+
+      <section className="mt-6 border border-black/10 bg-white p-5 sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--brand-gold-dark)]">
+              Your account
+            </p>
+            <h2 className="mt-1 font-display text-xl font-black italic uppercase">Profile</h2>
+          </div>
+          <Link href="/nominate/profile" className="btn-ghost !min-h-9 !text-[10px]">
+            Edit business details
+          </Link>
+        </div>
+        <dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div>
+            <dt className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#888]">Name</dt>
+            <dd className="mt-1 text-sm font-semibold">{account?.fullName || "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#888]">
+              Designation
+            </dt>
+            <dd className="mt-1 text-sm font-semibold">{account?.designation || "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#888]">Phone</dt>
+            <dd className="mt-1 text-sm font-semibold">{account?.mobile || "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#888]">Company</dt>
+            <dd className="mt-1 text-sm font-semibold">{account?.orgName || "—"}</dd>
+          </div>
+          <div className="sm:col-span-2">
+            <dt className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#888]">Email</dt>
+            <dd className="mt-1 text-sm font-semibold">{account?.email || "—"}</dd>
+          </div>
+        </dl>
+
+        <div className="mt-5 border-t border-black/10 pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-[#333]">Password</p>
+            <button
+              type="button"
+              className="btn-draft !min-h-9 !text-[10px]"
+              onClick={() => {
+                setShowPwForm((v) => !v);
+                setPwError("");
+                setPwMsg("");
+              }}
+            >
+              {showPwForm ? "Cancel" : "Reset password"}
+            </button>
+          </div>
+          {pwMsg && <p className="mt-2 text-sm text-[var(--brand-gold-dark)]">{pwMsg}</p>}
+          {pwError && <p className="mt-2 text-sm text-red-700">{pwError}</p>}
+          {showPwForm && (
+            <form className="mt-3 grid max-w-xl gap-3 sm:grid-cols-2" onSubmit={changePassword}>
+              <div className="sm:col-span-2">
+                <label className="label" htmlFor="currentPassword">
+                  Current password
+                </label>
+                <PasswordField id="currentPassword" name="currentPassword" required autoComplete="current-password" />
+              </div>
+              <div>
+                <label className="label" htmlFor="newPassword">
+                  New password
+                </label>
+                <PasswordField
+                  id="newPassword"
+                  name="newPassword"
+                  required
+                  autoComplete="new-password"
+                  minLength={8}
+                />
+              </div>
+              <div>
+                <label className="label" htmlFor="confirmPassword">
+                  Confirm new password
+                </label>
+                <PasswordField
+                  id="confirmPassword"
+                  name="confirmPassword"
+                  required
+                  autoComplete="new-password"
+                  minLength={8}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <button type="submit" className="btn-primary" disabled={pwBusy}>
+                  {pwBusy ? "Updating…" : "Update password"}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      </section>
 
       {loading ? (
         <div className="mt-8 space-y-6">

@@ -341,11 +341,8 @@ function PortalShellBody({
   }, [open]);
 
   useEffect(() => {
-    if (variant !== "jury") {
-      setHeaderUser(null);
-      return;
-    }
     setHeaderUser(getStoredUser());
+    if (variant === "observer") return;
     apiGet<{ user: AuthUser }>("/api/auth/me")
       .then((d) => {
         setHeaderUser(d.user);
@@ -356,6 +353,42 @@ function PortalShellBody({
         /* keep stored user */
       });
   }, [variant, pathname]);
+
+  const displayName = headerUser?.fullName || userLabel;
+  const displayMeta = [
+    headerUser?.designation,
+    headerUser?.orgName,
+    headerUser?.mobile,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const logoutBtn = (
+    <button
+      type="button"
+      onClick={handleLogout}
+      className={cn(
+        "inline-flex min-h-[4.75rem] min-w-[5.5rem] flex-col items-center justify-center gap-2 border px-3.5 text-[10px] font-bold uppercase tracking-[0.1em] transition",
+        t.menuBtn,
+      )}
+      title="Logout"
+    >
+      <LogOut size={18} aria-hidden />
+      <span className="leading-tight">Logout</span>
+    </button>
+  );
+
+  const compactContactBtn = (
+    <Link
+      href="/contact"
+      className={cn(
+        "inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 border px-2.5 text-[10px] font-bold uppercase tracking-[0.1em] transition",
+        t.menuBtn,
+      )}
+    >
+      Contact
+    </Link>
+  );
 
   return (
     <div className={cn("portal-page relative isolate min-h-screen", t.pageBg)}>
@@ -413,7 +446,7 @@ function PortalShellBody({
                     />
                   ) : (
                     <span className="font-display text-xl font-black italic text-white/90">
-                      {(headerUser?.fullName || userLabel).slice(0, 1)}
+                      {displayName.slice(0, 1)}
                     </span>
                   )}
                 </Link>
@@ -428,59 +461,53 @@ function PortalShellBody({
                     )}
                     title="My Profile"
                   >
-                    <span className="break-words">{userLabel}</span>
+                    <span className="break-words">{displayName}</span>
+                    {displayMeta ? (
+                      <span className="mt-0.5 block text-[9px] font-medium normal-case tracking-normal text-white/70">
+                        {displayMeta}
+                      </span>
+                    ) : null}
                   </Link>
                 ) : (
-                  <div
+                  <Link
+                    href={variant === "applicant" ? "/nominate/profile" : "#"}
                     className={cn(
-                      "w-full px-2.5 py-1.5 text-[10px] font-bold uppercase leading-snug tracking-[0.08em]",
+                      "w-full px-2.5 py-1.5 text-[10px] font-bold uppercase leading-snug tracking-[0.08em] transition hover:opacity-90",
                       t.userChip,
                     )}
+                    title="Account profile"
+                    onClick={(e) => {
+                      if (variant !== "applicant") e.preventDefault();
+                    }}
                   >
-                    <span className="break-words">{userLabel}</span>
-                  </div>
+                    <span className="break-words">{displayName}</span>
+                    {displayMeta ? (
+                      <span className="mt-0.5 block text-[9px] font-medium normal-case tracking-normal text-white/70">
+                        {displayMeta}
+                      </span>
+                    ) : null}
+                  </Link>
                 )}
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  className={cn(
-                    "inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 border px-2.5 text-[10px] font-bold uppercase tracking-[0.1em] transition",
-                    t.menuBtn,
-                  )}
-                >
-                  <LogOut size={14} aria-hidden />
-                  Logout
-                </button>
+                {/* Contact under profile; Logout is the tall action on the right (swapped) */}
+                {variant === "jury" ? (
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className={cn(
+                      "inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 border px-2.5 text-[10px] font-bold uppercase tracking-[0.1em] transition",
+                      t.menuBtn,
+                    )}
+                  >
+                    <LogOut size={14} aria-hidden />
+                    Logout
+                  </button>
+                ) : (
+                  compactContactBtn
+                )}
               </div>
             </div>
 
-            {variant !== "jury" && (
-              <Link
-                href="/contact"
-                className={cn(
-                  "inline-flex min-h-[4.75rem] min-w-[5.5rem] flex-col items-center justify-center gap-2 border px-3.5 text-[10px] font-bold uppercase tracking-[0.1em] transition",
-                  t.menuBtn,
-                )}
-                title="Contact now"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  className="h-5 w-5 shrink-0"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  aria-hidden
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M4 6.5A2.5 2.5 0 016.5 4h11A2.5 2.5 0 0120 6.5v7a2.5 2.5 0 01-2.5 2.5H9l-4 3.5V6.5z"
-                  />
-                  <path strokeLinecap="round" d="M8 9h8M8 12h5" />
-                </svg>
-                <span className="leading-tight">Contact Now</span>
-              </Link>
-            )}
+            {variant !== "jury" ? logoutBtn : null}
           </div>
         </div>
       </header>
@@ -532,6 +559,15 @@ function PortalShellBody({
                 </div>
 
                 <div className="flex shrink-0 items-center gap-2">
+                  <Link
+                    href="/contact"
+                    className={cn(
+                      "inline-flex h-10 items-center justify-center border px-2.5 text-[10px] font-bold uppercase tracking-[0.1em]",
+                      t.menuBtn,
+                    )}
+                  >
+                    Contact
+                  </Link>
                   <button
                     type="button"
                     onClick={handleLogout}
@@ -595,9 +631,12 @@ function PortalShellBody({
                     </button>
                   </div>
                   <div className="flex flex-1 flex-col overflow-y-auto px-3 py-3">
-                    <p className="mb-3 break-words px-2 text-xs uppercase leading-snug tracking-[0.08em] text-white/70">
-                      {userLabel}
-                    </p>
+                    <div className="mb-3 break-words px-2 text-xs uppercase leading-snug tracking-[0.08em] text-white/70">
+                      <p className="font-bold text-white/90">{displayName}</p>
+                      {displayMeta ? (
+                        <p className="mt-1 normal-case tracking-normal text-white/60">{displayMeta}</p>
+                      ) : null}
+                    </div>
                     <div className="flex flex-1 flex-col gap-2">
                       <ApplicantNavLinks
                         nav={nav}
@@ -610,6 +649,16 @@ function PortalShellBody({
                         onNavigate={() => setOpen(false)}
                       />
                     </div>
+                    <Link
+                      href="/contact"
+                      onClick={() => setOpen(false)}
+                      className={cn(
+                        "mt-4 flex w-full items-center justify-center border px-3 py-3 text-sm font-bold uppercase tracking-[0.08em]",
+                        t.menuBtn,
+                      )}
+                    >
+                      Contact Now
+                    </Link>
                     <button
                       type="button"
                       onClick={() => {
@@ -617,7 +666,7 @@ function PortalShellBody({
                         handleLogout();
                       }}
                       className={cn(
-                        "mt-4 flex w-full items-center justify-center gap-2 border px-3 py-3 text-sm font-bold uppercase tracking-[0.08em]",
+                        "mt-2 flex w-full items-center justify-center gap-2 border px-3 py-3 text-sm font-bold uppercase tracking-[0.08em]",
                         t.menuBtn,
                       )}
                     >
