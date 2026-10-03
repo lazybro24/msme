@@ -1,10 +1,18 @@
 import "dotenv/config";
 import { createApp, mountApiRoutes } from "./app";
+import { assertProductionConfig } from "./lib/assertProduction";
 
 const port = Number(process.env.PORT || 4000);
 
 async function main() {
   console.log("[boot] PORT=", port, "NODE_ENV=", process.env.NODE_ENV);
+
+  try {
+    assertProductionConfig();
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : err);
+    process.exit(1);
+  }
 
   // 1) Bind immediately with health-only app (no Prisma).
   const app = createApp();

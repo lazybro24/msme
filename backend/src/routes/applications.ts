@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import type { ApplicationStatus, Prisma } from "@prisma/client";
+import type { Application, ApplicationStatus, Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { AuthRequest, requireAuth, requireRoles } from "../lib/auth";
 import {
@@ -156,13 +156,7 @@ async function syncSharedAnswersToDraftSiblings(
 }
 
 /** If a draft is missing shared answers, copy them from any sibling (incl. submitted). */
-async function hydrateDraftFromSiblings(app: {
-  id: string;
-  applicantId: string;
-  status: string;
-  progress: number;
-  draftJson: unknown;
-}) {
+async function hydrateDraftFromSiblings(app: Application): Promise<Application> {
   if (app.status !== "DRAFT") return app;
   const draft = parseDraft(app.draftJson);
   const answers = { ...(draft.answers || {}) };

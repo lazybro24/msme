@@ -408,9 +408,11 @@ authRouter.post("/change-password", requireAuth, async (req: AuthRequest, res) =
 });
 
 authRouter.get("/demo-users", async (_req, res) => {
-  const enabled =
-    process.env.DEMO_USERS_ENABLED === "true" ||
-    (process.env.NODE_ENV !== "production" && process.env.DEMO_USERS_ENABLED !== "false");
+  // Never expose account listing in production
+  if (process.env.NODE_ENV === "production") {
+    return res.status(404).json({ error: "Not found" });
+  }
+  const enabled = process.env.DEMO_USERS_ENABLED !== "false";
   if (!enabled) {
     return res.status(404).json({ error: "Not found" });
   }

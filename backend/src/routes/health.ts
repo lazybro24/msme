@@ -25,8 +25,9 @@ healthRouter.get("/ready", async (_req, res) => {
   } catch {
     database = "down";
   }
-  res.status(200).json({
-    ok: database === "up",
+  const ok = database === "up";
+  res.status(ok ? 200 : 503).json({
+    ok,
     database,
     time: new Date().toISOString(),
   });

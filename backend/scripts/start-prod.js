@@ -16,10 +16,12 @@ if (process.env.RUN_MIGRATE_ON_START === "true") {
       timeout: 45_000,
     });
     if (r.status !== 0) {
-      console.warn("[start] migrate deploy exited", r.status, "— continuing");
+      console.error("[start] migrate deploy exited", r.status, "— aborting boot");
+      process.exit(r.status || 1);
     }
   } catch (err) {
-    console.warn("[start] migrate deploy failed — continuing:", err);
+    console.error("[start] migrate deploy failed — aborting boot:", err);
+    process.exit(1);
   }
 } else {
   console.log("[start] skipping migrate on boot (set RUN_MIGRATE_ON_START=true to enable)");

@@ -169,9 +169,27 @@ export function isProfileComplete(org: Organisation | null) {
 }
 
 export async function notify(userId: string, title: string, body: string) {
-  return prisma.notification.create({
+  const row = await prisma.notification.create({
     data: { userId, title, body },
   });
+  // Best-effort email mirror (in-app notification remains source of truth)
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true },
+    });
+    if (user?.email) {
+      const { sendEmail } = await import("./mail");
+      void sendEmail({
+        to: user.email,
+        subject: `[MSME Awards] ${title}`,
+        text: `${body}\n\n— Mysuru MSME Awards\nOpen your portal for details.`,
+      });
+    }
+  } catch (err) {
+    console.warn("[notify] email mirror failed:", err);
+  }
+  return row;
 }
 
 export async function audit(input: {

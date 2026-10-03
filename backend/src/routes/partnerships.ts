@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
-import { store } from "../lib/store";
 
 export const partnershipsRouter = Router();
 
@@ -22,9 +21,8 @@ partnershipsRouter.post("/", async (req, res) => {
   try {
     const item = await prisma.partnershipRequest.create({ data: parsed.data });
     return res.status(201).json({ item, source: "database" });
-  } catch {
-    const item = { id: store.id(), ...parsed.data, createdAt: store.now() };
-    store.partnerships.unshift(item);
-    return res.status(201).json({ item, source: "memory" });
+  } catch (err) {
+    console.error("[partnerships] create failed:", err);
+    return res.status(503).json({ error: "Unable to save partnership request. Please try again shortly." });
   }
 });

@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
-import { store } from "../lib/store";
 
 export const enquiriesRouter = Router();
 
@@ -28,10 +27,30 @@ enquiriesRouter.post("/", async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   try {
     const item = await prisma.enquiry.create({ data: parsed.data });
+    const inbox = process.env.MAIL_INBOX?.trim() || process.env.SMTP_FROM?.trim();
+    if (inbox) {
+      try {
+        const { sendEmail } = await import("../lib/mail");
+        void sendEmail({
+          to: inbox,
+          subject: `[Enquiry] ${parsed.data.nature} — ${parsed.data.fullName}`,
+          text: [
+            `Name: ${parsed.data.fullName}`,
+            `Email: ${parsed.data.email}`,
+            `Mobile: ${parsed.data.mobile}`,
+            `Organisation: ${parsed.data.organisation || "—"}`,
+            `Nature: ${parsed.data.nature}`,
+            "",
+            parsed.data.message,
+          ].join("\n"),
+        });
+      } catch {
+        /* non-blocking */
+      }
+    }
     return res.status(201).json({ item, source: "database" });
-  } catch {
-    const item = { id: store.id(), ...parsed.data, createdAt: store.now() };
-    store.enquiries.unshift(item);
-    return res.status(201).json({ item, source: "memory" });
+  } catch (err) {
+    console.error("[enquiries] create failed:", err);
+    return res.status(503).json({ error: "Unable to save enquiry. Please try again shortly." });
   }
 });

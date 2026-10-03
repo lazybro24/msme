@@ -10,9 +10,9 @@ RUN npm ci
 
 COPY . .
 
-# Build-time only — do NOT leave this as a runtime ENV (Railway injects real DATABASE_URL).
-ARG DATABASE_URL=postgresql://build:build@127.0.0.1:5432/build
-RUN DATABASE_URL="$DATABASE_URL" npx prisma generate && npx tsc
+# Dummy URL for prisma generate only — never pass real DATABASE_URL as a build arg
+# (Railway would expand it into image build logs).
+RUN DATABASE_URL="postgresql://build:build@127.0.0.1:5432/build" npx prisma generate && npx tsc
 
 ENV NODE_ENV=production
 EXPOSE 8080

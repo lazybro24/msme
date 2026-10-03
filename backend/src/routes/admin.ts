@@ -165,7 +165,6 @@ adminRouter.post(
     const schema = z.object({
       authRole: z.enum(["ADMINISTRATOR", "JURY_CHAIR"]),
       checklistComplete: z.literal(true),
-      demoDualAsAdmin: z.boolean().optional(),
     });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
@@ -178,10 +177,9 @@ adminRouter.post(
       lock.authAdminId = req.user!.id;
     }
     if (parsed.data.authRole === "JURY_CHAIR") {
-      const ok =
-        req.user!.roles.includes("JURY_CHAIR") ||
-        (parsed.data.demoDualAsAdmin && req.user!.roles.includes("ADMINISTRATOR"));
-      if (!ok) return res.status(403).json({ error: "Jury Chair role required" });
+      if (!req.user!.roles.includes("JURY_CHAIR")) {
+        return res.status(403).json({ error: "Jury Chair role required" });
+      }
       lock.authChairId = req.user!.id;
     }
 

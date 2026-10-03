@@ -7,9 +7,9 @@ export async function hashPassword(plain: string) {
 }
 
 export async function verifyPassword(plain: string, hashOrPlain: string) {
-  // Support legacy demo users that still store plaintext
-  if (!hashOrPlain.startsWith("$2")) {
-    return plain === hashOrPlain;
+  // Only bcrypt hashes are accepted — plaintext legacy compares are disabled.
+  if (!hashOrPlain || !hashOrPlain.startsWith("$2")) {
+    return false;
   }
   return bcrypt.compare(plain, hashOrPlain);
 }
