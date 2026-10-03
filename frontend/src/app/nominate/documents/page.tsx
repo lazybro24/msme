@@ -621,13 +621,6 @@ function DocumentsInner() {
           </div>
 
           <div className="mt-8 flex flex-col items-center gap-2 sm:flex-row sm:justify-end">
-            {!allMandatoryDone && (
-              <p className="text-center text-sm text-[#666] sm:mr-auto sm:text-left">
-                {missingMandatory.length} of {mandatory.length} still need action — upload the
-                document if you have it, or mark <span className="font-semibold">N/A</span> if it is
-                not available.
-              </p>
-            )}
             <button type="button" className="btn-primary" onClick={tryContinue}>
               Next step →
             </button>
