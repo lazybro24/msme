@@ -467,7 +467,7 @@ function DetailInner({ params }: { params: Promise<{ id: string }> }) {
                 ["Authorized Signatory", answers.decl_signatory],
                 ["Designation", answers.decl_designation],
                 ["Place", answers.decl_place],
-                ["Date", answers.decl_date],
+                ["Date & time", answers.decl_date],
                 [
                   "Declaration accepted",
                   answers.decl_agree === "yes" ? "Yes" : "No / not recorded",
