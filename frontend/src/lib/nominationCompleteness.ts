@@ -60,10 +60,11 @@ export function firstIncompleteStep(
   if (!filled(answers, "category_q_0")) return 5;
   if (!filled(answers, "mysuru_contribution")) return 6;
   if (!filled(answers, "signature_achievement")) return 7;
+  // 8 Evidence → 9 Review → 10 Declaration
   if (!filled(answers, "decl_signatory") || !yes(answers, "decl_agree")) {
-    return 9;
+    return 10;
   }
-  return 10;
+  return 9;
 }
 
 /** True when shared (non-scorecard) nomination answers are in place. */
@@ -96,7 +97,7 @@ export function activeNominationSteps(
   multiCategory: boolean,
 ): number[] {
   if (multiCategory && sharedNominationComplete(answers)) {
-    return [5, 10];
+    return [5, 9, 10];
   }
   if (multiCategory && sharedAnswersReady(answers)) {
     const steps: number[] = [];
@@ -112,7 +113,7 @@ export function activeNominationSteps(
     if (!filled(answers, "mysuru_contribution")) steps.push(6);
     if (!filled(answers, "signature_achievement")) steps.push(7);
     steps.push(8);
-    if (!filled(answers, "decl_signatory") || !yes(answers, "decl_agree")) steps.push(9);
+    steps.push(9);
     steps.push(10);
     return steps;
   }
@@ -128,8 +129,8 @@ export function stepForMissingField(label: string): number {
   if (l.includes("category question")) return 5;
   if (l.includes("mysuru")) return 6;
   if (l.includes("signature")) return 7;
-  if (l.includes("declaration")) return 9;
-  return 10;
+  if (l.includes("declaration")) return 10;
+  return 9;
 }
 
 /** Human step title for the redirect button. */
@@ -142,8 +143,8 @@ export function stepLabelForMissingField(label: string): string {
     5: "Category Questions",
     6: "Mysuru Contribution",
     7: "Signature Achievement",
-    9: "Declaration",
-    10: "Review & Submit",
+    9: "Review & Submit",
+    10: "Declaration",
   };
   return labels[step] ?? "Nomination form";
 }
@@ -156,8 +157,13 @@ export function nextActiveStep(
 ): number {
   const path = activeNominationSteps(answers, multiCategory);
   const idx = path.indexOf(current);
-  if (idx === -1) return path[0] ?? 10;
-  return path[Math.min(path.length - 1, idx + 1)];
+  if (idx !== -1) {
+    return path[Math.min(path.length - 1, idx + 1)];
+  }
+  // Current step just dropped out of the path (e.g. Mysuru completed and shared
+  // sections collapsed to scorecard-only). Advance forward — never rewind to step 5.
+  const forward = path.find((s) => s > current);
+  return forward ?? path[path.length - 1] ?? 10;
 }
 
 /** Previous step in the active path. */
@@ -168,8 +174,10 @@ export function prevActiveStep(
 ): number {
   const path = activeNominationSteps(answers, multiCategory);
   const idx = path.indexOf(current);
-  if (idx <= 0) return path[0] ?? 1;
-  return path[idx - 1];
+  if (idx > 0) return path[idx - 1];
+  if (idx === 0) return path[0] ?? 1;
+  const backward = [...path].reverse().find((s) => s < current);
+  return backward ?? path[0] ?? 1;
 }
 
 /**
@@ -194,8 +202,9 @@ export function firstIncompleteActiveStep(
     if (s === 5 && !filled(answers, "category_q_0")) return 5;
     if (s === 6 && !filled(answers, "mysuru_contribution")) return 6;
     if (s === 7 && !filled(answers, "signature_achievement")) return 7;
-    if (s === 9 && (!filled(answers, "decl_signatory") || !yes(answers, "decl_agree"))) {
-      return 9;
+    if (s === 9) return 9;
+    if (s === 10 && (!filled(answers, "decl_signatory") || !yes(answers, "decl_agree"))) {
+      return 10;
     }
     if (s === 10) return 10;
     if (s < 5 && absolute <= s) return s;

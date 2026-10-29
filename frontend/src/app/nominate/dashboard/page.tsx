@@ -315,11 +315,21 @@ function DashboardInner() {
           ? scorecardMode
             ? `Shared details are done. Complete and submit the scorecard for each remaining category: ${draftApps.map((a) => a.categoryTitle).join(" · ") || categoryNames.join(" · ")}.`
             : `One nomination for ${categoryNames.join(" · ")}. Fill shared details once, then each category’s scorecard.`
-          : "Answer each section in order, then review and submit for verification.",
+          : "Answer each section in order through evidence and review.",
       href: reviewHref,
       done: submitted,
       locked: !profileDone || !categoryDone || !documentsDone,
       current: profileDone && categoryDone && documentsDone && !submitted,
+    },
+    {
+      id: 6,
+      label: "6. Declaration form",
+      title: "Business declaration & submit",
+      body: "Confirm the undertaking and submit your nomination for eligibility review.",
+      href: "/nominate/declaration",
+      done: submitted,
+      locked: !profileDone || !categoryDone || !documentsDone || apps.length === 0,
+      current: false,
     },
   ];
 
@@ -330,7 +340,9 @@ function DashboardInner() {
       ? scorecardMode && draftApps[0]
         ? `Complete scorecard · ${draftApps[0].categoryTitle}`
         : "Continue nomination form"
-      : `Continue · ${currentStep.title}`
+      : currentStep.id === 6
+        ? "Continue to Declaration"
+        : `Continue · ${currentStep.title}`
     : submitDone
       ? "Open Application"
       : `Go to · ${currentStep.title}`;

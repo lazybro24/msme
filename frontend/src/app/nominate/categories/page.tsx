@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useMemo, useState, useRef } from "react";
 import { createPortal } from "react-dom";
@@ -9,8 +8,10 @@ import { applicantNav, PortalShell } from "@/components/portal/PortalShell";
 import { AuthGate } from "@/components/portal/AuthGate";
 import { IncompleteGateDialog } from "@/components/portal/IncompleteGate";
 import { useUnsavedProcessGuard } from "@/hooks/UnsavedProcessContext";
+import { usePageProcess } from "@/hooks/PageProcessContext";
 import { CategoryBackdrop } from "@/components/awards/CategoryIcon";
-import { getDirectApplyCategories, awardCategories } from "@/content/awards";
+import { getDirectApplyCategories, awardCategories, type AwardCategory } from "@/content/awards";
+import { mandatoryDocuments } from "@/content/requiredDocuments";
 import { apiPost, apiGet, getStoredUser } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -76,11 +77,13 @@ function CategoryInner() {
     awardCategories.find((c) => c.code === "MOTY")!,
     ...categories,
   ];
-  const router = useRouter();
+  const pageProcess = usePageProcess();
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [finderOpen, setFinderOpen] = useState(false);
+  const [docsOpen, setDocsOpen] = useState(false);
+  const [docsFocusSlugs, setDocsFocusSlugs] = useState<string[]>([]);
   const [mounted, setMounted] = useState(false);
   const [profileReady, setProfileReady] = useState<boolean | null>(null);
   const [locked, setLocked] = useState(false);
@@ -131,7 +134,7 @@ function CategoryInner() {
     if (locked) {
       if (goNext) {
         allowNavRef.current();
-        router.push("/nominate/documents");
+        pageProcess.navigate("/nominate/documents", "Loading documents…");
       }
       return;
     }
@@ -145,12 +148,13 @@ function CategoryInner() {
     if (!newSlugs.length) {
       if (goNext) {
         allowNavRef.current();
-        router.push("/nominate/documents");
+        pageProcess.navigate("/nominate/documents", "Loading documents…");
       }
       return;
     }
     setBusy(true);
     setError("");
+    pageProcess.begin("Saving categories…");
     try {
       const user = getStoredUser();
       const categoriesPayload = newSlugs.map((slug) => {
@@ -170,11 +174,14 @@ function CategoryInner() {
       setBusy(false);
       if (goNext) {
         allowNavRef.current();
-        router.push("/nominate/documents");
+        pageProcess.navigate("/nominate/documents", "Loading documents…");
+      } else {
+        pageProcess.end();
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save categories");
       setBusy(false);
+      pageProcess.end();
     }
   }
 
@@ -238,15 +245,15 @@ function CategoryInner() {
 
   function toggle(slug: string) {
     if (locked) return;
-    setSelected((prev) => {
-      if (prev.includes(slug)) {
-        // Keep already-saved applications selected
-        if (existingSlugs.includes(slug)) return prev;
-        return prev.filter((s) => s !== slug);
-      }
-      if (prev.length >= 2) return prev;
-      return [...prev, slug];
-    });
+    if (selected.includes(slug)) {
+      // Keep already-saved applications selected
+      if (existingSlugs.includes(slug)) return;
+      setSelected((prev) => prev.filter((s) => s !== slug));
+      return;
+    }
+    if (selected.length >= 2) return;
+    setSelected((prev) => [...prev, slug]);
+    openDocsPreview([slug]);
   }
 
   function applyRecommendations() {
@@ -269,13 +276,11 @@ function CategoryInner() {
     setMounted(true);
   }, []);
 
-  // Every page open: blur page + tip text fade in/out for 5s
+  // Open Category Finder when the page loads
   useEffect(() => {
     if (!mounted || locked || loadingApps || cueStartedRef.current) return;
     cueStartedRef.current = true;
-    setSpotlight(true);
-    const tipTimer = window.setTimeout(() => setSpotlight(false), 5000);
-    return () => window.clearTimeout(tipTimer);
+    setFinderOpen(true);
   }, [mounted, locked, loadingApps]);
 
   useEffect(() => {
@@ -283,7 +288,7 @@ function CategoryInner() {
   }, [finderOpen]);
 
   useEffect(() => {
-    if (!finderOpen && !spotlight) return;
+    if (!finderOpen && !spotlight && !docsOpen) return;
     const prevOverflow = document.body.style.overflow;
     const prevPadding = document.body.style.paddingRight;
     const scrollbar = window.innerWidth - document.documentElement.clientWidth;
@@ -293,11 +298,32 @@ function CategoryInner() {
       document.body.style.overflow = prevOverflow;
       document.body.style.paddingRight = prevPadding;
     };
-  }, [finderOpen, spotlight]);
+  }, [finderOpen, spotlight, docsOpen]);
 
   function dismissFinderCue() {
     setSpotlight(false);
   }
+
+  function openDocsPreview(slugs: string[]) {
+    setDocsFocusSlugs(slugs);
+    setDocsOpen(true);
+    setSpotlight(false);
+  }
+
+  const docsFocusCategories = useMemo(
+    () =>
+      docsFocusSlugs
+        .map((slug) => awardCategories.find((c) => c.slug === slug))
+        .filter((c): c is AwardCategory => Boolean(c)),
+    [docsFocusSlugs],
+  );
+
+  const docsPreviewCount = useMemo(() => {
+    const evidenceCount = selected
+      .map((slug) => awardCategories.find((c) => c.slug === slug)?.evidence.length ?? 0)
+      .reduce((a, b) => a + b, 0);
+    return mandatoryDocuments.length + evidenceCount;
+  }, [selected]);
 
   return (
     <PortalShell
@@ -358,6 +384,7 @@ function CategoryInner() {
         {/* Blur + FAB tip cue (portaled above page isolate stacking) */}
         {mounted &&
           !finderOpen &&
+          !docsOpen &&
           !locked &&
           createPortal(
             <>
@@ -376,20 +403,20 @@ function CategoryInner() {
                   setFinderOpen(true);
                 }}
                 className={cn(
-                  "finder-fab group fixed bottom-5 right-5 flex items-end gap-0 sm:bottom-6 sm:right-6",
+                  "finder-fab group fixed bottom-5 right-5 flex flex-col items-center gap-2 sm:bottom-6 sm:right-6",
                   spotlight ? "z-[60] finder-fab--spotlight" : "z-40",
                 )}
                 aria-label="Find what fits you — open category recommendations"
               >
                 <span
                   className={cn(
-                    "finder-fab__label pointer-events-none mb-2 mr-2 max-w-[11rem]",
+                    "finder-fab__label pointer-events-none max-w-[11rem]",
                     spotlight
                       ? "finder-fab__label--cue"
-                      : "translate-x-2 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 group-focus-visible:translate-x-0 group-focus-visible:opacity-100",
+                      : "translate-y-2 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100",
                   )}
                 >
-                  <span className="finder-fab__label-box inline-block border border-[var(--brand-gold)]/50 bg-[#1a0c10] px-3 py-2 text-left text-[10px] font-bold uppercase leading-snug tracking-[0.1em] text-white">
+                  <span className="finder-fab__label-box inline-block border border-[var(--brand-gold)]/50 bg-[#1a0c10] px-3 py-2 text-center text-[10px] font-bold uppercase leading-snug tracking-[0.1em] text-white">
                     Not sure?
                     <br />
                     Find what fits you
@@ -423,19 +450,19 @@ function CategoryInner() {
                 onClick={() => setFinderOpen(false)}
               />
               <div className="finder-modal__panel relative z-[1] flex w-full max-w-4xl flex-col overflow-hidden border border-[var(--brand-gold)]/35 bg-white shadow-[0_28px_60px_-20px_rgba(0,0,0,0.55)] sm:max-h-[min(88vh,720px)]">
-                <div className="shrink-0 border-b border-black/10 bg-gradient-to-r from-[#1a0a0e] via-[#2a1218] to-[#1a0a0e] px-5 py-4 text-white sm:px-6 sm:py-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
+                <div className="finder-modal__pad shrink-0 border-b border-black/10 bg-gradient-to-r from-[#1a0a0e] via-[#2a1218] to-[#1a0a0e] py-5 text-white sm:py-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0 pr-2">
                       <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--brand-gold)]">
                         Category Finder
                       </p>
                       <h2
                         id="finder-title"
-                        className="mt-1 font-display text-xl font-black italic uppercase tracking-tight sm:text-2xl"
+                        className="mt-1.5 font-display text-xl font-black italic uppercase tracking-tight sm:text-2xl"
                       >
                         Choose What Fits You
                       </h2>
-                      <p className="mt-1.5 text-sm text-white/70">
+                      <p className="mt-2 text-sm leading-relaxed text-white/70">
                         Answer a few questions — we&apos;ll recommend matching awards (max 2 to
                         apply).
                       </p>
@@ -451,8 +478,8 @@ function CategoryInner() {
                   </div>
                 </div>
 
-                <div className="grid min-h-0 flex-1 overflow-hidden lg:grid-cols-2">
-                  <div className="max-h-[42vh] space-y-4 overflow-y-auto overscroll-contain border-b border-black/10 p-5 sm:p-6 lg:max-h-none lg:border-b-0 lg:border-r">
+                <div className="grid min-h-0 flex-1 grid-cols-2 overflow-hidden">
+                  <div className="finder-modal__pad min-h-0 min-w-0 space-y-5 overflow-y-auto overscroll-contain border-r border-black/10 py-6">
                     <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--brand-gold-dark)]">
                       Your business
                     </p>
@@ -496,29 +523,29 @@ function CategoryInner() {
                     />
                   </div>
 
-                  <div className="flex max-h-[38vh] flex-col bg-[#f7f4f2] lg:max-h-none">
-                    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6">
+                  <div className="flex min-h-0 min-w-0 flex-col bg-[#f7f4f2]">
+                    <div className="finder-modal__pad min-h-0 flex-1 overflow-y-auto overscroll-contain py-6">
                       <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--brand-gold-dark)]">
                         Recommendations
                       </p>
-                      <h3 className="mt-1 font-display text-lg font-black italic uppercase">
+                      <h3 className="mt-1.5 font-display text-lg font-black italic uppercase">
                         Recommended for You
                       </h3>
                       {!recommendations.length ? (
-                        <div className="mt-6 border border-dashed border-black/15 bg-white/70 px-4 py-8 text-center">
+                        <div className="mt-6 border border-dashed border-black/15 bg-white/70 px-5 py-10 text-center sm:px-6 sm:py-12">
                           <p className="font-display text-3xl font-black italic text-[var(--brand-gold)]/40">
                             !
                           </p>
-                          <p className="mt-2 text-sm text-[#666]">
+                          <p className="mt-3 text-sm leading-relaxed text-[#666]">
                             Complete the questions to see which awards fit best.
                           </p>
                         </div>
                       ) : (
-                        <ul className="mt-4 space-y-3">
+                        <ul className="mt-5 space-y-3.5">
                           {recommendations.map((r, i) => (
                             <li
                               key={r.slug}
-                              className="border border-black/10 border-l-4 border-l-[var(--brand-gold)] bg-white p-4"
+                              className="border border-black/10 border-l-4 border-l-[var(--brand-gold)] bg-white p-4 sm:p-5"
                             >
                               <div className="flex items-center justify-between gap-2">
                                 <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--brand-gold-dark)]">
@@ -528,19 +555,19 @@ function CategoryInner() {
                                   {String(i + 1).padStart(2, "0")}
                                 </span>
                               </div>
-                              <p className="mt-1 font-display text-sm font-bold uppercase leading-snug">
+                              <p className="mt-1.5 font-display text-sm font-bold uppercase leading-snug">
                                 {r.title}
                               </p>
-                              <p className="mt-1 text-sm text-[#666]">{r.tagline}</p>
+                              <p className="mt-1.5 text-sm leading-relaxed text-[#666]">{r.tagline}</p>
                             </li>
                           ))}
                         </ul>
                       )}
-                      <p className="mt-4 text-xs text-[#888]">
+                      <p className="mt-5 text-xs leading-relaxed text-[#888]">
                         MSME of the Year is qualification-based and cannot be selected here.
                       </p>
                     </div>
-                    <div className="shrink-0 border-t border-black/10 bg-white p-4 sm:px-6">
+                    <div className="finder-modal__pad shrink-0 border-t border-black/10 bg-white py-4 sm:py-5">
                       <button
                         type="button"
                         className="btn-primary w-full"
@@ -552,6 +579,190 @@ function CategoryInner() {
                           : "Answer questions to continue"}
                       </button>
                     </div>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )}
+
+        {mounted &&
+          docsOpen &&
+          createPortal(
+            <div
+              className="finder-modal docs-preview fixed inset-0 z-[200] flex items-end justify-center sm:items-center sm:p-6"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="docs-preview-title"
+            >
+              <button
+                type="button"
+                className="absolute inset-0 bg-[#0d0507]/75 backdrop-blur-[2px]"
+                aria-label="Close documents preview"
+                onClick={() => setDocsOpen(false)}
+              />
+              <div className="finder-modal__panel relative z-[1] flex w-full max-w-2xl flex-col overflow-hidden border border-[var(--brand-gold)]/35 bg-white shadow-[0_28px_60px_-20px_rgba(0,0,0,0.55)] sm:max-h-[min(88vh,720px)]">
+                <div className="finder-modal__pad shrink-0 border-b border-black/10 bg-gradient-to-r from-[#1a0a0e] via-[#2a1218] to-[#1a0a0e] py-5 text-white sm:py-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0 pr-2">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--brand-gold)]">
+                        {docsFocusCategories.length === 1
+                          ? `${docsFocusCategories[0].number} · ${docsFocusCategories[0].code}`
+                          : "Selected categories"}
+                      </p>
+                      <h2
+                        id="docs-preview-title"
+                        className="mt-1.5 font-display text-xl font-black italic uppercase tracking-tight sm:text-2xl"
+                      >
+                        {docsFocusCategories.length === 1
+                          ? docsFocusCategories[0].title
+                          : "Documents & Evidence"}
+                      </h2>
+                      <p className="mt-2 text-sm leading-relaxed text-white/70">
+                        {docsFocusCategories.length === 1
+                          ? docsFocusCategories[0].tagline
+                          : "Mandatory proof for all applicants, plus evidence for your selected awards."}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center border border-white/25 text-white transition hover:border-[var(--brand-gold)] hover:text-[var(--brand-gold)]"
+                      aria-label="Close"
+                      onClick={() => setDocsOpen(false)}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="finder-modal__pad min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain py-6">
+                  {docsFocusCategories.map((cat) => (
+                    <section key={`${cat.slug}-details`} className="space-y-4">
+                      {docsFocusCategories.length > 1 && (
+                        <h3 className="font-display text-base font-black italic uppercase text-[#1a0c10]">
+                          {cat.title}
+                        </h3>
+                      )}
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--brand-gold-dark)]">
+                          Award details
+                        </p>
+                        <p className="mt-2 text-sm leading-relaxed text-[#444]">{cat.overview}</p>
+                        {cat.whoShouldApply.length > 0 && (
+                          <ul className="mt-3 space-y-1.5">
+                            {cat.whoShouldApply.map((item) => (
+                              <li key={item} className="text-sm leading-snug text-[#555]">
+                                <span className="mr-2 text-[var(--brand-gold-dark)]">·</span>
+                                {item}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--brand-gold-dark)]">
+                          Category-specific achievement &amp; evidence requirements
+                        </p>
+                        <p className="mt-2 text-xs leading-relaxed text-[#666]">
+                          Provide relevant documents demonstrating achievements in this category.
+                          Equivalent supporting evidence may be accepted, subject to verification.
+                        </p>
+                        <div className="mt-3 overflow-x-auto border border-black/10">
+                          <table className="w-full min-w-[28rem] border-collapse text-left text-sm">
+                            <thead className="bg-[#1a0c10] text-white">
+                              <tr>
+                                <th className="w-10 px-2 py-2 text-[10px] font-bold uppercase tracking-[0.12em]">
+                                  No.
+                                </th>
+                                <th className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em]">
+                                  Supporting evidence document
+                                </th>
+                                <th className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em]">
+                                  Purpose
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {cat.supportingEvidence.map((item, i) => (
+                                <tr
+                                  key={item.document}
+                                  className="border-t border-black/10 odd:bg-[#f7f4f2] even:bg-white"
+                                >
+                                  <td className="px-2 py-2.5 align-top text-[11px] font-bold text-[var(--brand-gold-dark)]">
+                                    {i + 1}
+                                  </td>
+                                  <td className="px-3 py-2.5 align-top text-[13px] leading-snug text-[#333]">
+                                    {item.document}
+                                  </td>
+                                  <td className="px-3 py-2.5 align-top text-[12px] leading-snug text-[#666]">
+                                    {item.purpose}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        {cat.recommendedAdditional && (
+                          <p className="mt-3 text-xs leading-relaxed text-[#666]">
+                            <span className="font-semibold text-[#333]">Recommended additional: </span>
+                            {cat.recommendedAdditional}
+                          </p>
+                        )}
+                        {cat.juryFocus && (
+                          <p className="mt-2 text-xs leading-relaxed text-[#666]">
+                            <span className="font-semibold text-[#333]">Jury focus: </span>
+                            {cat.juryFocus}
+                          </p>
+                        )}
+                        {cat.evidenceNotes?.map((note) => (
+                          <p
+                            key={note}
+                            className="mt-2 border border-[var(--brand-gold)]/30 bg-[#fff8e8] px-3 py-2 text-xs leading-relaxed text-[#555]"
+                          >
+                            <span className="font-semibold text-[#333]">Important: </span>
+                            {note}
+                          </p>
+                        ))}
+                      </div>
+                    </section>
+                  ))}
+
+                  <section>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--brand-gold-dark)]">
+                      Section A — Basic business documents
+                    </p>
+                    <p className="mt-1.5 text-xs text-[#666]">
+                      Upload once for all categories (shared across nominations).
+                    </p>
+                    <ul className="mt-3 space-y-2">
+                      {mandatoryDocuments.map((doc) => (
+                        <li
+                          key={doc.name}
+                          className="border border-black/10 border-l-4 border-l-[var(--brand-gold)] bg-[#f7f4f2] px-3 py-2.5 text-sm text-[#333]"
+                        >
+                          <span className="font-medium">{doc.name}</span>
+                          <span className="mt-0.5 block text-[10px] font-bold uppercase tracking-[0.12em] text-[#888]">
+                            {doc.evidenceType}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                </div>
+
+                <div className="finder-modal__pad shrink-0 border-t border-black/10 bg-[#f7f4f2] py-4 sm:py-5">
+                  <p className="text-xs leading-relaxed text-[#666]">
+                    Category selected. Uploads happen later on Documents and Supporting Evidence —
+                    this popup is a preview only.
+                  </p>
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      onClick={() => setDocsOpen(false)}
+                    >
+                      Got it — continue selecting
+                    </button>
                   </div>
                 </div>
               </div>
@@ -593,27 +804,28 @@ function CategoryInner() {
                     <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--brand-gold)] min-[480px]:text-[10px]">
                       {c.number} · {c.code} · Locked
                     </p>
-                    <div>
+                    <div className="min-w-0">
                       <h2 className="font-display text-base font-black uppercase italic tracking-tight text-white min-[480px]:text-lg sm:text-xl">
                         {c.title}
                       </h2>
-                      <p className="mt-1.5 text-[11px] leading-snug text-white/80 min-[480px]:mt-2 min-[480px]:text-xs sm:text-sm sm:leading-relaxed">
-                        Qualification-based — not open for direct nomination. Strong performers from
-                        other categories may be considered.
-                      </p>
+                      <div className="mt-2 min-[480px]:mt-2.5">
+                        <CategorySwapFaces
+                          tagline="Qualification-based — not open for direct nomination. Strong performers from other categories may be considered."
+                          evidence={c.evidence}
+                          staggerMs={0}
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
               );
             }
 
+            const blockIndex = allBlocks.findIndex((b) => b.slug === c.slug);
+
             return (
-              <button
+              <div
                 key={c.slug}
-                type="button"
-                onClick={() => toggle(c.slug)}
-                disabled={locked || atLimit}
-                aria-pressed={on}
                 className={cn(
                   "category-block group relative overflow-hidden border text-left shadow-[3px_4px_0_rgba(26,12,16,0.1)] transition",
                   shape.span,
@@ -622,7 +834,6 @@ function CategoryInner() {
                   on
                     ? "z-[2] border-[var(--brand-gold)] shadow-[4px_5px_0_rgba(232,169,20,0.45)] ring-2 ring-[var(--brand-gold)]"
                     : "border-black/20 hover:z-[1] hover:border-[var(--brand-gold)]/70 hover:shadow-[5px_6px_0_rgba(26,12,16,0.16)]",
-                  (locked || atLimit) && "cursor-not-allowed",
                   !locked && atLimit && "opacity-50",
                   locked && !on && "opacity-40",
                 )}
@@ -642,7 +853,16 @@ function CategoryInner() {
                       : "bg-gradient-to-t from-black/80 via-black/40 to-black/10 group-hover:from-black/75",
                   )}
                 />
-                <div className="relative z-[1] flex h-full flex-col justify-between p-2.5 min-[480px]:p-3.5 sm:p-4">
+                <button
+                  type="button"
+                  onClick={() => toggle(c.slug)}
+                  disabled={locked || atLimit}
+                  aria-pressed={on}
+                  className={cn(
+                    "relative z-[1] flex h-full w-full flex-col justify-between p-3 text-left max-[479px]:p-2.5 sm:p-5",
+                    (locked || atLimit) && "cursor-not-allowed",
+                  )}
+                >
                   <div className="flex items-start justify-between gap-1.5 min-[480px]:gap-2">
                     <div className="min-w-0">
                       <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--brand-gold)] min-[480px]:text-[10px] min-[480px]:tracking-[0.14em]">
@@ -670,9 +890,13 @@ function CategoryInner() {
                     <p className="font-display text-xs font-bold uppercase leading-snug tracking-tight text-white min-[480px]:text-sm sm:text-base">
                       {c.title}
                     </p>
-                    <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-white/80 sm:text-xs">
-                      {c.tagline}
-                    </p>
+                    <div className="mt-1.5 min-[480px]:mt-2">
+                      <CategorySwapFaces
+                        tagline={c.tagline}
+                        evidence={c.evidence}
+                        staggerMs={(Math.max(blockIndex, 0) % 5) * 700}
+                      />
+                    </div>
                     <p
                       className={cn(
                         "mt-2 text-[10px] font-bold uppercase tracking-[0.12em]",
@@ -690,14 +914,31 @@ function CategoryInner() {
                             : "Tap to select"}
                     </p>
                   </div>
-                </div>
-              </button>
+                </button>
+              </div>
             );
           })}
         </div>
 
         {error && (
           <p className="border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</p>
+        )}
+
+        {selected.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border border-[var(--brand-gold)]/35 bg-[#1a0c10] px-4 py-3 text-white sm:px-5">
+            <p className="text-sm leading-snug">
+              You&apos;ll need{" "}
+              <span className="font-semibold text-[var(--brand-gold)]">{docsPreviewCount}</span>{" "}
+              document types for your selection (mandatory + category evidence).
+            </p>
+            <button
+              type="button"
+              className="shrink-0 border border-[var(--brand-gold)]/60 bg-transparent px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--brand-gold)] transition hover:bg-[var(--brand-gold)] hover:text-[#1a0c10]"
+              onClick={() => openDocsPreview(selected)}
+            >
+              View required docs
+            </button>
+          </div>
         )}
 
         <div className="mt-2 flex flex-wrap items-center justify-between gap-3 border border-black/10 bg-white p-4 sm:p-5">
@@ -717,9 +958,16 @@ function CategoryInner() {
             )}
           </div>
           {locked ? (
-            <Link href="/nominate/documents" className="btn-primary">
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => {
+                allowNavRef.current();
+                pageProcess.navigate("/nominate/documents", "Loading documents…");
+              }}
+            >
               Continue to Documents
-            </Link>
+            </button>
           ) : (
             <button
               type="button"
@@ -737,6 +985,66 @@ function CategoryInner() {
   );
 }
 
+function CategorySwapFaces({
+  tagline,
+  evidence,
+  staggerMs = 0,
+  intervalMs = 5000,
+}: {
+  tagline: string;
+  evidence: string[];
+  staggerMs?: number;
+  intervalMs?: number;
+}) {
+  const slides = useMemo(
+    () => [
+      { kind: "award" as const, label: "Award", text: tagline },
+      {
+        kind: "docs" as const,
+        label: "Docs & evidence",
+        text:
+          evidence.length > 0
+            ? `${evidence.length} category evidence areas · select to view requirements`
+            : `${mandatoryDocuments.length} mandatory uploads for every applicant`,
+      },
+    ],
+    [tagline, evidence],
+  );
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    let intervalId = 0;
+    const startId = window.setTimeout(() => {
+      intervalId = window.setInterval(() => {
+        setIndex((i) => (i + 1) % 2);
+      }, intervalMs);
+    }, staggerMs);
+    return () => {
+      window.clearTimeout(startId);
+      window.clearInterval(intervalId);
+    };
+  }, [intervalMs, staggerMs]);
+
+  const slide = slides[index] ?? slides[0];
+
+  return (
+    <div className="category-swap" aria-live="polite">
+      <div key={`${slide.kind}-${index}`} className="category-swap__face">
+        <p className="category-swap__label">{slide.label}</p>
+        <p className="category-swap__text">{slide.text}</p>
+      </div>
+      <div className="category-swap__dots" aria-hidden>
+        {slides.map((s, i) => (
+          <span
+            key={s.kind}
+            className={cn("category-swap__dot", i === index && "category-swap__dot--on")}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function FinderField({
   label,
   value,
@@ -749,8 +1057,8 @@ function FinderField({
   options: string[];
 }) {
   return (
-    <div>
-      <label className="label">{label}</label>
+    <div className="finder-modal__field space-y-2">
+      <label className="label !mb-0">{label}</label>
       <select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">Select</option>
         {options.map((o) => (

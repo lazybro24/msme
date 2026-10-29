@@ -12,6 +12,7 @@ import {
 import { usePathname, useRouter } from "next/navigation";
 import { clearSession } from "@/lib/api";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
+import { usePageProcessOptional } from "@/hooks/PageProcessContext";
 
 type GuardApi = {
   getDirty: () => boolean;
@@ -52,6 +53,7 @@ function isSameDestination(href: string, pathname: string) {
 export function UnsavedProcessProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
+  const pageProcess = usePageProcessOptional();
   const apiRef = useRef<GuardApi | null>(null);
   const bypassRef = useRef(false);
   const [pendingHref, setPendingHref] = useState<string | null>(null);
@@ -94,6 +96,10 @@ export function UnsavedProcessProvider({ children }: { children: ReactNode }) {
       window.location.href = "/nominate/login";
       return;
     }
+    if (pageProcess) {
+      pageProcess.navigate(href, "Loading next step…");
+      return;
+    }
     router.push(href);
   }
 
@@ -102,10 +108,12 @@ export function UnsavedProcessProvider({ children }: { children: ReactNode }) {
     const href = pendingHref;
     if (!href) return;
     setSaving(true);
+    pageProcess?.begin("Saving progress…");
     try {
       if (api) await api.onSave();
       go(href);
     } catch {
+      pageProcess?.end();
       /* keep dialog open on save failure */
     } finally {
       setSaving(false);
@@ -114,11 +122,6 @@ export function UnsavedProcessProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
-      if (bypassRef.current) {
-        bypassRef.current = false;
-        return;
-      }
-      if (!isDirty()) return;
       if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
         return;
       }
@@ -133,14 +136,33 @@ export function UnsavedProcessProvider({ children }: { children: ReactNode }) {
       }
       if (isSameDestination(href, pathname)) return;
 
-      e.preventDefault();
-      e.stopPropagation();
-      setPendingHref(normalizePath(href) || href);
+      if (bypassRef.current) {
+        bypassRef.current = false;
+        if (pageProcess && href.startsWith("/nominate")) {
+          e.preventDefault();
+          e.stopPropagation();
+          pageProcess.navigate(href, "Loading next step…");
+        }
+        return;
+      }
+
+      if (isDirty()) {
+        e.preventDefault();
+        e.stopPropagation();
+        setPendingHref(normalizePath(href) || href);
+        return;
+      }
+
+      if (pageProcess && href.startsWith("/nominate")) {
+        e.preventDefault();
+        e.stopPropagation();
+        pageProcess.navigate(href, "Loading next step…");
+      }
     }
 
     document.addEventListener("click", onClick, true);
     return () => document.removeEventListener("click", onClick, true);
-  }, [pathname]);
+  }, [pathname, pageProcess]);
 
   useEffect(() => {
     function onBeforeUnload(e: BeforeUnloadEvent) {

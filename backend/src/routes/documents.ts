@@ -203,6 +203,8 @@ documentsRouter.post(
       const name = String(req.body?.name || "").trim();
       const evidenceType = String(req.body?.evidenceType || req.body?.type || "Other").trim();
       const applicationRef = String(req.body?.applicationId || "").trim();
+      const description =
+        String(req.body?.description || "").trim() || "Marked not available by applicant";
       if (!name) return res.status(400).json({ error: "Document name is required" });
 
       let applicationId: string | null = null;
@@ -239,7 +241,7 @@ documentsRouter.post(
           name,
           evidenceType,
           period: "N/A",
-          description: "Marked not available by applicant",
+          description,
           visibility: "Confidential",
           fileUrl: "na:unavailable",
           fileName: "N/A",

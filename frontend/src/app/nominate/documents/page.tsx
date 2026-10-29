@@ -2,15 +2,15 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { applicantNav, PortalShell } from "@/components/portal/PortalShell";
 import { AuthGate } from "@/components/portal/AuthGate";
 import { IncompleteGateDialog } from "@/components/portal/IncompleteGate";
 import { useUnsavedProcessGuard } from "@/hooks/UnsavedProcessContext";
+import { usePageProcess } from "@/hooks/PageProcessContext";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
-import { ProcessOverlay } from "@/components/ui/ProcessOverlay";
 import { apiDelete, apiGet, apiPost, getToken, getStoredUser, API_URL } from "@/lib/api";
 import { authFileUrl } from "@/lib/files";
+import { mandatoryDocuments } from "@/content/requiredDocuments";
 
 const MAX_UPLOAD_MB = 5;
 const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
@@ -28,15 +28,7 @@ const evidenceTypes = [
   "Other",
 ];
 
-const mandatoryDefaults = [
-  { name: "Udyam Certificate", evidenceType: "Statutory" },
-  { name: "PAN", evidenceType: "Statutory" },
-  { name: "GST Certificate", evidenceType: "Statutory" },
-  { name: "Incorporation / Registration Proof", evidenceType: "Statutory" },
-  { name: "Proof of Mysuru Operations", evidenceType: "Operational" },
-  { name: "Financial / Performance Evidence", evidenceType: "Financial" },
-  { name: "Authorized Applicant Declaration", evidenceType: "Statutory" },
-];
+const mandatoryDefaults = mandatoryDocuments;
 
 type Doc = {
   id: string;
@@ -83,7 +75,7 @@ export default function DocumentsPage() {
 }
 
 function DocumentsInner() {
-  const router = useRouter();
+  const pageProcess = usePageProcess();
   const user = getStoredUser();
   const [docs, setDocs] = useState<Doc[]>([]);
   const [mandatory, setMandatory] = useState<MandatoryItem[]>(
@@ -190,6 +182,7 @@ function DocumentsInner() {
     if (!assertFileSize(file)) return;
     setBusyName(name);
     setMsg("");
+    pageProcess.begin(`Uploading ${name}…`);
     try {
       await uploadFile({
         name,
@@ -200,6 +193,7 @@ function DocumentsInner() {
       });
       // Drop overlay immediately so scroll unlocks; refresh list quietly
       setBusyName("");
+      pageProcess.end();
       setMandatory((prev) =>
         prev.map((m) =>
           m.name === name
@@ -221,12 +215,14 @@ function DocumentsInner() {
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Upload failed");
       setBusyName("");
+      pageProcess.end();
     }
   }
 
   async function markMandatoryNa(name: string, evidenceType: string) {
     setBusyName(name);
     setMsg("");
+    pageProcess.begin(`Updating ${name}…`);
     try {
       await apiPost("/api/documents/na", {
         name,
@@ -234,6 +230,7 @@ function DocumentsInner() {
         ...(applicationRef ? { applicationId: applicationRef } : {}),
       });
       setBusyName("");
+      pageProcess.end();
       setMandatory((prev) =>
         prev.map((m) =>
           m.name === name
@@ -255,6 +252,7 @@ function DocumentsInner() {
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Could not mark as N/A");
       setBusyName("");
+      pageProcess.end();
     }
   }
 
@@ -273,6 +271,7 @@ function DocumentsInner() {
     }
     setExtraBusy(true);
     setMsg("");
+    pageProcess.begin("Uploading document…");
     try {
       await uploadFile({
         name: String(fd.get("name") || "Untitled"),
@@ -284,10 +283,12 @@ function DocumentsInner() {
       });
       form.reset();
       setExtraBusy(false);
+      pageProcess.end();
       void load({ quiet: true });
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Upload failed");
       setExtraBusy(false);
+      pageProcess.end();
     }
   }
 
@@ -303,8 +304,7 @@ function DocumentsInner() {
 
   const allMandatoryDone = completeCount >= mandatory.length && mandatory.length > 0;
   const missingMandatory = mandatory.filter((m) => !m.done);
-  const uploading = Boolean(busyName) || extraBusy;
-  // Only lock for the size alert here — ProcessOverlay already locks while uploading
+  // Only lock for the size alert here — page process overlay locks while uploading
   useBodyScrollLock(Boolean(sizeAlert));
 
   const { allowNextNavigation } = useUnsavedProcessGuard({
@@ -317,7 +317,7 @@ function DocumentsInner() {
   function tryContinue() {
     if (allMandatoryDone) {
       allowNextNavigation();
-      router.push(continueHref);
+      pageProcess.navigate(continueHref, "Loading nomination form…");
       return;
     }
     setHighlightMissing(true);
@@ -343,8 +343,6 @@ function DocumentsInner() {
         }
         onStay={() => setIncompleteOpen(false)}
       />
-
-      <ProcessOverlay open={uploading} />
 
       {sizeAlert && (
         <div

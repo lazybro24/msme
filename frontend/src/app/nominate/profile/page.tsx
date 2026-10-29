@@ -1,7 +1,6 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { applicantNav, PortalShell } from "@/components/portal/PortalShell";
 import { AuthGate } from "@/components/portal/AuthGate";
 import { MfaSettings } from "@/components/portal/MfaSettings";
@@ -10,6 +9,7 @@ import {
   markIncompleteFields,
 } from "@/components/portal/IncompleteGate";
 import { useUnsavedProcessGuard } from "@/hooks/UnsavedProcessContext";
+import { usePageProcess } from "@/hooks/PageProcessContext";
 import { apiGet, apiPut, getStoredUser, getToken, setSession, type AuthUser } from "@/lib/api";
 
 export type BusinessProfile = {
@@ -94,7 +94,6 @@ function readProfileFromForm(form: HTMLFormElement): BusinessProfile {
 }
 
 function BusinessProfileInner() {
-  const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const [authUser, setAuthUser] = useState<AuthUser | null>(() => getStoredUser());
   const [profile, setProfile] = useState<BusinessProfile>(emptyProfile);
@@ -108,6 +107,7 @@ function BusinessProfileInner() {
   const [missingCount, setMissingCount] = useState(0);
   const [dirty, setDirty] = useState(false);
 
+  const pageProcess = usePageProcess();
   const { allowNextNavigation } = useUnsavedProcessGuard({
     dirty: editing && dirty,
     onSave: async () => {
@@ -149,6 +149,7 @@ function BusinessProfileInner() {
     setBusy(true);
     setError("");
     setSaved(false);
+    pageProcess.begin("Saving business details…");
     try {
       const res = await apiPut<{ profile: BusinessProfile; complete: boolean }>(
         "/api/profile",
@@ -161,10 +162,13 @@ function BusinessProfileInner() {
       setSaved(true);
       if (goNext) {
         allowNextNavigation();
-        router.push("/nominate/categories");
+        pageProcess.navigate("/nominate/categories", "Loading categories…");
+      } else {
+        pageProcess.end();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save profile");
+      pageProcess.end();
     } finally {
       setBusy(false);
     }
@@ -185,7 +189,7 @@ function BusinessProfileInner() {
   function tryContinueFromView() {
     if (complete) {
       allowNextNavigation();
-      router.push("/nominate/categories");
+      pageProcess.navigate("/nominate/categories", "Loading categories…");
       return;
     }
     setEditing(true);

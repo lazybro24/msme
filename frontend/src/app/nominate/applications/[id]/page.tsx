@@ -20,6 +20,7 @@ import { getCategoryBySlug, awardCategories } from "@/content/awards";
 import { CategoryBackdrop } from "@/components/awards/CategoryIcon";
 import { apiGet, apiPatch, apiPost, API_URL, getToken } from "@/lib/api";
 import { useUnsavedProcessGuard } from "@/hooks/UnsavedProcessContext";
+import { usePageProcess } from "@/hooks/PageProcessContext";
 import type { BusinessProfile } from "@/app/nominate/profile/page";
 import {
   activeNominationSteps,
@@ -36,7 +37,6 @@ import {
   stepLabelForMissingField,
 } from "@/lib/nominationCompleteness";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ProcessOverlay } from "@/components/ui/ProcessOverlay";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 
 type Answers = Record<string, string>;
@@ -46,11 +46,25 @@ type DocRow = {
   name: string;
   fileName?: string | null;
   evidenceType: string;
+  description?: string | null;
   done?: boolean;
 };
 
-const MAX_UPLOAD_MB = 5;
+const MAX_UPLOAD_MB = 10;
 const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
+const EVIDENCE_ACCEPT = ".pdf,.jpg,.jpeg,.png,.xlsx,.xls,application/pdf,image/jpeg,image/png";
+
+/** Short label for upload matching (full requirement text stays in the UI). */
+function shortEvidenceTitle(document: string) {
+  const cut = document.split(
+    /,| showing | with evidence | with | such as | supported by | including | describing | demonstrating | outlining | covering | containing /i,
+  )[0];
+  return (cut || document).trim();
+}
+
+function countWords(text: string) {
+  return text.trim() ? text.trim().split(/\s+/).length : 0;
+}
 
 function WorkspaceInner({
   params,
@@ -59,8 +73,10 @@ function WorkspaceInner({
 }) {
   const { id } = use(params);
   const router = useRouter();
+  const pageProcess = usePageProcess();
   const searchParams = useSearchParams();
   const focusScorecard = searchParams.get("focus") === "scorecard";
+  const focusDeclaration = searchParams.get("focus") === "declaration";
   const viewStatus = searchParams.get("view") === "status";
   const code = id.split("-")[1] ?? "MFG";
   const byCode = awardCategories.find((c) => c.code === code);
@@ -83,6 +99,10 @@ function WorkspaceInner({
   const category = getCategoryBySlug(appMeta.categorySlug) ?? byCode;
   const scorecard = category?.criteria ?? [];
   const [step, setStep] = useState(1);
+  /** Furthest step reached in the active path — earlier steps show as completed/scratched. */
+  const [progressStep, setProgressStep] = useState(1);
+  /** When revisiting a completed step, editing stays locked until pencil confirm. */
+  const [editUnlocked, setEditUnlocked] = useState(false);
   const [answers, setAnswers] = useState<Answers>({});
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [submitMsg, setSubmitMsg] = useState("");
@@ -132,12 +152,23 @@ function WorkspaceInner({
       scorecard.length,
       multiCategory,
     );
-    return Math.min(applicationSteps.length, Math.max(1, firstBad));
-  }, [answers, scorecard.length, multiCategory]);
+    return Math.min(
+      applicationSteps.length,
+      Math.max(1, firstBad, progressStep),
+    );
+  }, [answers, scorecard.length, multiCategory, progressStep]);
+
+  const viewingCompletedStep =
+    isDraft && activeSteps.includes(step) && step < progressStep;
+  const stepFormLocked = viewingCompletedStep && !editUnlocked;
 
   useEffect(() => {
     answersRef.current = answers;
   }, [answers]);
+
+  useEffect(() => {
+    setEditUnlocked(false);
+  }, [step]);
 
   useUnsavedProcessGuard({
     dirty: dirty && isDraft,
@@ -184,7 +215,9 @@ function WorkspaceInner({
           );
           if (cancelled) return;
           if (docs.totalMandatory > 0 && docs.completeCount < docs.totalMandatory) {
-            router.replace("/nominate/documents");
+            pageProcess.navigate("/nominate/documents", "Loading documents…", {
+              replace: true,
+            });
             return;
           }
         }
@@ -245,24 +278,23 @@ function WorkspaceInner({
 
         const multi = listApps.length > 1;
         const resume = firstIncompleteActiveStep(loadedAnswers, qCount, multi);
-        const otherSubmitted = listApps.some(
-          (a) => a.applicationId !== d.application.applicationId && a.status !== "DRAFT",
-        );
-        const sharedReady = sharedAnswersReady(loadedAnswers);
-        // Multi-category: skip shared steps already answered on another category
-        const preferScorecard =
-          statusRaw === "DRAFT" &&
-          (focusScorecard ||
-            otherSubmitted ||
-            (multi && sharedReady) ||
-            (multi && sharedNominationComplete(loadedAnswers)));
 
         if (statusRaw !== "DRAFT") {
           setStep(applicationSteps.length);
-        } else if (preferScorecard) {
-          setStep(resume);
+          setProgressStep(applicationSteps.length);
+        } else if (focusDeclaration) {
+          setStep(10);
+          setProgressStep(Math.max(10, draftStep || 10, resume));
         } else {
-          setStep(Math.min(draftStep, resume));
+          // Never rewind behind the first incomplete step; keep draft progress for scratch UI.
+          // focusScorecard still lands on resume (usually category scorecard).
+          const preferred = focusScorecard
+            ? resume
+            : draftStep >= resume
+              ? draftStep
+              : resume;
+          setStep(preferred);
+          setProgressStep(Math.max(preferred, draftStep || preferred));
         }
       } catch {
         /* ignore */
@@ -277,7 +309,7 @@ function WorkspaceInner({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, focusScorecard]);
+  }, [id, focusScorecard, focusDeclaration]);
 
   function collectStepAnswers(): Answers {
     const root = stepRootRef.current;
@@ -369,6 +401,7 @@ function WorkspaceInner({
     const s = nextStep ?? step;
     setSaving(true);
     setSaveError("");
+    pageProcess.begin("Saving answers & evidence…");
     try {
       const documents = await fetchDocumentSnapshot();
       await apiPatch(`/api/applications/${id}`, {
@@ -385,10 +418,12 @@ function WorkspaceInner({
         `Draft saved — ${Object.keys(merged).length} answers, ${documents.length} document${documents.length === 1 ? "" : "s"}.`,
       );
       setDirty(false);
+      pageProcess.end();
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not save draft";
       setSaveError(msg);
       setSubmitMsg("");
+      pageProcess.end();
       throw e;
     } finally {
       setSaving(false);
@@ -412,6 +447,8 @@ function WorkspaceInner({
 
   function goNext(merged: Answers) {
     const next = nextActiveStep(step, merged, multiCategory);
+    setProgressStep((p) => Math.max(p, next, step));
+    setEditUnlocked(false);
     setStep(next);
     void saveDraft(merged, next);
   }
@@ -421,6 +458,16 @@ function WorkspaceInner({
     const merged = mergeAnswers(partial);
     if (!assertStepComplete()) return;
     goNext(merged);
+  }
+
+  async function askEditCompletedStep() {
+    const ok = await confirm({
+      title: "Edit this page?",
+      message: `Do you want to edit details on “${current.label}”?`,
+      confirmLabel: "Yes, edit",
+      cancelLabel: "No",
+    });
+    if (ok) setEditUnlocked(true);
   }
 
   function tryGoToStep(target: number) {
@@ -435,8 +482,9 @@ function WorkspaceInner({
     const partial = collectStepAnswers();
     const merged = mergeAnswers(partial);
 
-    // Always allow going back within the active path
-    if (target < step) {
+    // Revisit a completed (scratched) step — open locked until pencil confirm
+    if (target < progressStep) {
+      setEditUnlocked(false);
       setStep(target);
       void saveDraft(merged, target);
       return;
@@ -453,7 +501,14 @@ function WorkspaceInner({
       setIncompleteOpen(true);
       return;
     }
+    if (stepFormLocked) {
+      setIncompleteBanner("Unlock this page with the pencil if you need to edit before continuing.");
+      setIncompleteOpen(true);
+      return;
+    }
     if (!assertStepComplete()) return;
+    setProgressStep((p) => Math.max(p, target));
+    setEditUnlocked(false);
     setStep(target);
     void saveDraft(merged, target);
   }
@@ -483,7 +538,11 @@ function WorkspaceInner({
           siblingApps={siblingApps}
           onViewAnswers={() => {
             setStep(applicationSteps.length);
-            router.replace(`/nominate/applications/${appMeta.id}?view=answers`);
+            pageProcess.navigate(
+              `/nominate/applications/${appMeta.id}?view=answers`,
+              "Loading answers…",
+              { replace: true },
+            );
           }}
         />
       </PortalShell>
@@ -522,8 +581,6 @@ function WorkspaceInner({
         allowSkip={false}
         onStay={() => setIncompleteOpen(false)}
       />
-      <ProcessOverlay open={saving} />
-
       <div className="mb-6 border border-black/10 bg-white p-5 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -592,10 +649,14 @@ function WorkspaceInner({
                           : `/nominate/applications/${sib.applicationId}?view=status`;
                       if (dirty && isDraft) {
                         void saveDraft()
-                          .then(() => router.push(href))
-                          .catch(() => router.push(href));
+                          .then(() =>
+                            pageProcess.navigate(href, "Loading category form…"),
+                          )
+                          .catch(() =>
+                            pageProcess.navigate(href, "Loading category form…"),
+                          );
                       } else {
-                        router.push(href);
+                        pageProcess.navigate(href, "Loading category form…");
                       }
                     }}
                     className={`min-h-10 border px-3 py-2 text-left text-xs font-bold uppercase tracking-[0.08em] transition ${
@@ -658,6 +719,8 @@ function WorkspaceInner({
             {applicationSteps.map((s) => {
               const active = activeSteps.includes(s.id);
               const skipped = multiCategory && !active;
+              const completed = !skipped && active && s.id < progressStep;
+              const isCurrent = step === s.id;
               return (
                 <button
                   key={s.id}
@@ -665,27 +728,37 @@ function WorkspaceInner({
                   onClick={() => tryGoToStep(s.id)}
                   disabled={skipped || s.id > maxReachableStep}
                   className={`flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm font-semibold ${
-                    step === s.id
+                    isCurrent
                       ? "bg-black text-white"
-                      : skipped
-                        ? "cursor-not-allowed text-[#bbb] line-through decoration-[#ccc]"
+                      : skipped || completed
+                        ? "text-[#bbb] line-through decoration-[#ccc]"
                         : s.id > maxReachableStep
                           ? "cursor-not-allowed text-[#bbb]"
                           : "text-[#333] hover:bg-black/5"
-                  }`}
+                  } ${skipped ? "cursor-not-allowed" : ""}`}
                 >
                   <span
                     className={`w-6 font-display text-xs font-black italic ${
-                      step === s.id ? "text-[var(--brand-gold)]" : "text-[#999]"
+                      isCurrent ? "text-[var(--brand-gold)]" : "text-[#999]"
                     }`}
                   >
                     {String(s.id).padStart(2, "0")}
                   </span>
                   <span className="min-w-0 flex-1">
-                    {s.label}
+                    <span className={isCurrent && completed ? "line-through decoration-white/40" : undefined}>
+                      {s.label}
+                    </span>
                     {skipped ? (
                       <span className="mt-0.5 block text-[10px] font-medium normal-case tracking-normal text-[#aaa] no-underline">
                         From other category
+                      </span>
+                    ) : completed ? (
+                      <span
+                        className={`mt-0.5 block text-[10px] font-medium normal-case tracking-normal no-underline ${
+                          isCurrent ? "text-white/55" : "text-[#aaa]"
+                        }`}
+                      >
+                        Completed
                       </span>
                     ) : null}
                   </span>
@@ -696,79 +769,137 @@ function WorkspaceInner({
         </aside>
 
         <div className="border border-black/10 bg-white p-5 sm:p-6">
-          <h2 className="font-display text-xl font-black italic uppercase sm:text-2xl">
-            {String(current.id).padStart(2, "0")}. {current.label}
-          </h2>
-
-          <div
-            ref={stepRootRef}
-            className="min-h-[12rem]"
-            onInput={() => {
-              setDirty(true);
-              if (incompleteBanner) setIncompleteBanner("");
-            }}
-            onChange={() => {
-              setDirty(true);
-              if (incompleteBanner) setIncompleteBanner("");
-            }}
-          >
-            {step === 1 && <ProfileStep />}
-            {step === 2 && <EligibilityStep answers={answers} />}
-            {step === 3 && <OverviewStep answers={answers} />}
-            {step === 4 && <PerformanceSection answers={answers} />}
-            {step === 5 && (
-              <CategoryQuestionsSection
-                scorecard={scorecard}
-                answers={answers}
-                categoryTitle={appMeta.categoryTitle}
-              />
-            )}
-            {step === 6 && <MysuruStep answers={answers} />}
-            {step === 7 && <SignatureStep answers={answers} />}
-            {step === 8 && (
-              <EvidenceSection applicationId={id} onChanged={() => setDirty(true)} />
-            )}
-            {step === 9 && <DeclarationSection answers={answers} />}
-            {step === 10 && (
-              <ReviewSection
-                applicationId={id}
-                categoryTitle={appMeta.categoryTitle}
-                answers={answers}
-                scorecard={scorecard}
-                confirm={confirm}
-                canEdit={isDraft}
-                otherCategories={siblingApps.filter((s) => s.applicationId !== appMeta.id)}
-                buildSubmitPayload={buildSubmitPayload}
-                onEditStep={(targetStep) => {
-                  const partial = collectStepAnswers();
-                  mergeAnswers(partial);
-                  setStep(targetStep);
-                  window.scrollTo({ top: 0, behavior: "smooth" });
-                }}
-                onSubmitted={(status) => {
-                  setAppMeta((m) => ({
-                    ...m,
-                    status: status.replaceAll("_", " "),
-                    statusRaw: status,
-                  }));
-                  setDirty(false);
-                  const nextDraft = siblingApps.find(
-                    (s) => s.applicationId !== appMeta.id && s.status === "DRAFT",
-                  );
-                  setSubmitMsg(
-                    nextDraft
-                      ? `Submitted for ${appMeta.categoryTitle}. Next: complete the scorecard for ${nextDraft.categoryTitle}.`
-                      : "Nomination submitted — Eligibility Review",
-                  );
-                  setSiblingApps((list) =>
-                    list.map((s) =>
-                      s.applicationId === appMeta.id ? { ...s, status } : s,
-                    ),
-                  );
-                }}
-              />
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="font-display text-xl font-black italic uppercase sm:text-2xl">
+                {String(current.id).padStart(2, "0")}. {current.label}
+              </h2>
+              {viewingCompletedStep && (
+                <p className="mt-1 text-xs text-[#888]">
+                  {stepFormLocked
+                    ? "This section is completed. Use the pencil to edit."
+                    : "Editing unlocked — save when you are done."}
+                </p>
+              )}
+            </div>
+            {viewingCompletedStep && isDraft && (
+              <button
+                type="button"
+                className="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center border border-black/15 text-[#333] transition hover:border-[var(--brand-gold)] hover:text-[var(--brand-gold-dark)] disabled:cursor-default disabled:opacity-40"
+                aria-label={editUnlocked ? "Editing enabled" : "Edit this page"}
+                disabled={editUnlocked}
+                onClick={() => void askEditCompletedStep()}
+              >
+                <Pencil size={16} strokeWidth={2.25} aria-hidden />
+              </button>
             )}
           </div>
+
+          <fieldset
+            disabled={stepFormLocked}
+            className={`min-w-0 border-0 p-0 ${stepFormLocked ? "opacity-80" : ""}`}
+          >
+            <legend className="sr-only">{current.label}</legend>
+            <div
+              ref={stepRootRef}
+              className="min-h-[12rem]"
+              onInput={() => {
+                if (stepFormLocked) return;
+                setDirty(true);
+                if (incompleteBanner) setIncompleteBanner("");
+              }}
+              onChange={() => {
+                if (stepFormLocked) return;
+                setDirty(true);
+                if (incompleteBanner) setIncompleteBanner("");
+              }}
+            >
+              {step === 1 && <ProfileStep />}
+              {step === 2 && <EligibilityStep answers={answers} />}
+              {step === 3 && <OverviewStep answers={answers} />}
+              {step === 4 && <PerformanceSection answers={answers} />}
+              {step === 5 && (
+                <CategoryQuestionsSection
+                  scorecard={scorecard}
+                  answers={answers}
+                  categoryTitle={appMeta.categoryTitle}
+                />
+              )}
+              {step === 6 && <MysuruStep answers={answers} />}
+              {step === 7 && <SignatureStep answers={answers} />}
+              {step === 8 && (
+                <EvidenceSection
+                  applicationId={id}
+                  categorySlug={appMeta.categorySlug}
+                  categoryTitle={appMeta.categoryTitle}
+                  onChanged={() => setDirty(true)}
+                />
+              )}
+              {step === 9 && (
+                <ReviewSection
+                  applicationId={id}
+                  categoryTitle={appMeta.categoryTitle}
+                  answers={answers}
+                  scorecard={scorecard}
+                  confirm={confirm}
+                  canEdit={isDraft}
+                  reviewOnly
+                  otherCategories={siblingApps.filter((s) => s.applicationId !== appMeta.id)}
+                  buildSubmitPayload={buildSubmitPayload}
+                  onContinueToDeclaration={() => {
+                    const partial = collectStepAnswers();
+                    const merged = mergeAnswers(partial);
+                    setProgressStep((p) => Math.max(p, 10));
+                    setEditUnlocked(false);
+                    setStep(10);
+                    void saveDraft(merged, 10);
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
+                  onEditStep={(targetStep) => {
+                    const partial = collectStepAnswers();
+                    mergeAnswers(partial);
+                    setEditUnlocked(false);
+                    setStep(targetStep);
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
+                  onSubmitted={() => undefined}
+                />
+              )}
+              {step === 10 && (
+                <DeclarationSection
+                  answers={answers}
+                  categoryTitle={appMeta.categoryTitle}
+                  applicationId={appMeta.id}
+                  canSubmit={isDraft}
+                  confirm={confirm}
+                  scorecard={scorecard}
+                  otherCategories={siblingApps.filter((s) => s.applicationId !== appMeta.id)}
+                  buildSubmitPayload={buildSubmitPayload}
+                  onSubmitted={(status) => {
+                    setAppMeta((m) => ({
+                      ...m,
+                      status: status.replaceAll("_", " "),
+                      statusRaw: status,
+                    }));
+                    setDirty(false);
+                    const nextDraft = siblingApps.find(
+                      (s) => s.applicationId !== appMeta.id && s.status === "DRAFT",
+                    );
+                    setSubmitMsg(
+                      nextDraft
+                        ? `Submitted for ${appMeta.categoryTitle}. Next: complete the scorecard for ${nextDraft.categoryTitle}.`
+                        : "Nomination submitted — Eligibility Review",
+                    );
+                    setSiblingApps((list) =>
+                      list.map((s) =>
+                        s.applicationId === appMeta.id ? { ...s, status } : s,
+                      ),
+                    );
+                  }}
+                />
+              )}
+            </div>
+          </fieldset>
 
           <div className="mobile-sticky-actions">
             {incompleteBanner && (
@@ -784,6 +915,7 @@ function WorkspaceInner({
                   const partial = collectStepAnswers();
                   const merged = mergeAnswers(partial);
                   const prev = prevActiveStep(step, merged, multiCategory);
+                  setEditUnlocked(false);
                   setStep(prev);
                   void saveDraft(merged, prev);
                 }}
@@ -792,7 +924,7 @@ function WorkspaceInner({
                 ← Back
               </button>
               <div className="order-1 flex flex-col gap-2 sm:order-2 sm:flex-row sm:items-center">
-                {isDraft && (
+                {isDraft && !stepFormLocked && (
                   <button
                     type="button"
                     className="btn-draft w-full sm:w-auto"
@@ -812,15 +944,43 @@ function WorkspaceInner({
                     ← Back to status
                   </Link>
                 )}
-                {isDraft && step !== activeSteps[activeSteps.length - 1] && (
+                {isDraft && viewingCompletedStep && stepFormLocked && (
+                  <button
+                    type="button"
+                    className="btn-primary w-full sm:w-auto"
+                    onClick={() => {
+                      setEditUnlocked(false);
+                      setStep(progressStep);
+                      window.scrollTo({ top: 0, behavior: "smooth" });
+                    }}
+                  >
+                    Return to current step →
+                  </button>
+                )}
+                {isDraft && viewingCompletedStep && editUnlocked && (
                   <button
                     type="button"
                     className="btn-primary w-full sm:w-auto"
                     onClick={saveContinue}
                   >
-                    {scorecardOnly && step === 5 ? "Continue to review →" : "Next step →"}
+                    Save &amp; continue
                   </button>
                 )}
+                {isDraft &&
+                  !viewingCompletedStep &&
+                  step !== activeSteps[activeSteps.length - 1] && (
+                    <button
+                      type="button"
+                      className="btn-primary w-full sm:w-auto"
+                      onClick={saveContinue}
+                    >
+                      {scorecardOnly && step === 5
+                        ? "Continue to review →"
+                        : step === 9
+                          ? "Continue to Declaration →"
+                          : "Save & continue"}
+                    </button>
+                  )}
               </div>
             </div>
           </div>
@@ -1482,19 +1642,43 @@ function SignatureStep({ answers }: { answers: Answers }) {
 
 function EvidenceSection({
   applicationId,
+  categorySlug,
+  categoryTitle,
   onChanged,
 }: {
   applicationId: string;
+  categorySlug: string;
+  categoryTitle: string;
   onChanged?: () => void;
 }) {
-  const [docs, setDocs] = useState<DocRow[]>([]);
+  const category =
+    getCategoryBySlug(categorySlug) ||
+    awardCategories.find((c) => c.slug === categorySlug) ||
+    awardCategories.find((c) => c.title === categoryTitle);
+  const requirements = category?.supportingEvidence ?? [];
+  const [uploaded, setUploaded] = useState<DocRow[]>([]);
+  const [notes, setNotes] = useState<Record<string, string>>({});
   const [busyKey, setBusyKey] = useState("");
   const [msg, setMsg] = useState("");
   const [sizeAlert, setSizeAlert] = useState<string | null>(null);
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({});
-  const uploadRef = useRef<HTMLInputElement | null>(null);
-  // ProcessOverlay locks while busy; only lock here for the size alert dialog
+  const pageProcess = usePageProcess();
   useBodyScrollLock(Boolean(sizeAlert));
+
+  const slots = useMemo(
+    () =>
+      requirements.map((req, i) => {
+        const title = shortEvidenceTitle(req.document);
+        const match = uploaded.find(
+          (d) =>
+            d.name === title ||
+            d.name === req.document ||
+            d.name.toLowerCase().includes(title.toLowerCase()),
+        );
+        return { index: i, req, title, match };
+      }),
+    [requirements, uploaded],
+  );
 
   function load() {
     apiGet<{
@@ -1503,42 +1687,64 @@ function EvidenceSection({
         name: string;
         fileName?: string | null;
         evidenceType: string;
-      }[];
-      mandatory: {
-        name: string;
-        done: boolean;
-        documentId: string | null;
-        fileName?: string | null;
+        description?: string | null;
+        applicationId?: string | null;
       }[];
     }>("/api/documents")
       .then((d) => {
-        const uploaded = (d.documents || []).map((x) => ({
+        const all = d.documents || [];
+        const forApp = all.filter(
+          (x) =>
+            !x.applicationId ||
+            x.applicationId === applicationId ||
+            String(x.applicationId).includes(applicationId),
+        );
+        const rows = (forApp.length ? forApp : all).map((x) => ({
           id: x.id,
           name: x.name,
           fileName: x.fileName,
           evidenceType: x.evidenceType,
+          description: x.description,
           done: true,
         }));
-        if (uploaded.length) {
-          setDocs(uploaded);
-          return;
-        }
-        setDocs(
-          (d.mandatory || []).map((m) => ({
-            id: m.documentId || undefined,
-            name: m.name,
-            fileName: m.fileName,
-            evidenceType: "Statutory",
-            done: m.done,
-          })),
-        );
+        setUploaded(rows);
+        setNotes((prev) => {
+          const next = { ...prev };
+          for (const r of rows) {
+            if (r.description && !next[r.name]) next[r.name] = r.description;
+          }
+          return next;
+        });
       })
-      .catch(() => setDocs([]));
+      .catch(() => setUploaded([]));
   }
 
   useEffect(() => {
     load();
-  }, []);
+  }, [applicationId]);
+
+  function assertFile(file: File | null): file is File {
+    if (!file) return false;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setSizeAlert(
+        `Your file is ${(file.size / (1024 * 1024)).toFixed(1)} MB. It should be less than ${MAX_UPLOAD_MB} MB.`,
+      );
+      return false;
+    }
+    const name = file.name.toLowerCase();
+    const okExt =
+      name.endsWith(".pdf") ||
+      name.endsWith(".jpg") ||
+      name.endsWith(".jpeg") ||
+      name.endsWith(".png") ||
+      name.endsWith(".xlsx") ||
+      name.endsWith(".xls");
+    if (!okExt) {
+      setSizeAlert("Only PDF, JPG, PNG or XLSX files are supported.");
+      return false;
+    }
+    return true;
+  }
 
   async function uploadFile(opts: {
     name: string;
@@ -1568,65 +1774,65 @@ function EvidenceSection({
     return data;
   }
 
-  async function onPickFile(
-    key: string,
-    name: string,
-    evidenceType: string,
-    file: File | null,
-  ) {
-    if (!file) return;
-    if (file.size > MAX_UPLOAD_BYTES) {
-      setSizeAlert(
-        `Your file is ${(file.size / (1024 * 1024)).toFixed(1)} MB. It should be less than ${MAX_UPLOAD_MB} MB.`,
-      );
+  async function onPickFile(title: string, file: File | null) {
+    if (!assertFile(file)) return;
+    const note = String(notes[title] || "").trim();
+    if (!note) {
+      setMsg("Add a short note: what achievement does this document demonstrate? (required before upload)");
       return;
     }
-    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-    if (!isPdf) {
-      setSizeAlert("Only PDF format is supported. Please upload a .pdf file.");
+    if (countWords(note) > 100) {
+      setMsg("Achievement note must be 100 words or fewer.");
       return;
     }
-    setBusyKey(key);
+    setBusyKey(title);
     setMsg("");
+    pageProcess.begin(`Uploading ${title}…`);
     try {
-      await uploadFile({ name, evidenceType, file });
+      await uploadFile({
+        name: title,
+        evidenceType: "Category",
+        file,
+        description: note,
+      });
       setBusyKey("");
+      pageProcess.end();
       onChanged?.();
       load();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Upload failed");
       setBusyKey("");
+      pageProcess.end();
     }
   }
 
-  async function markNa(key: string, name: string, evidenceType: string) {
-    setBusyKey(key);
+  async function markNa(title: string) {
+    const note = String(notes[title] || "").trim();
+    setBusyKey(title);
     setMsg("");
+    pageProcess.begin("Updating evidence…");
     try {
       await apiPost("/api/documents/na", {
-        name,
-        evidenceType,
+        name: title,
+        evidenceType: "Category",
         applicationId,
+        description: note || "Not available for this assessment area",
       });
       setBusyKey("");
-      setDocs((prev) =>
-        prev.map((d) =>
-          (d.id || d.name) === key || d.name === name
-            ? { ...d, done: true, fileName: "N/A" }
-            : d,
-        ),
-      );
+      pageProcess.end();
       onChanged?.();
       load();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Could not mark as N/A");
       setBusyKey("");
+      pageProcess.end();
     }
   }
 
+  const covered = slots.filter((s) => s.match?.fileName).length;
+
   return (
-    <div className="mt-4 space-y-4">
-      <ProcessOverlay open={Boolean(busyKey)} />
+    <div className="mt-4 space-y-5">
       {sizeAlert && (
         <div
           className="fixed inset-0 z-[120] flex items-center justify-center overflow-y-auto overscroll-none bg-[#1a1814]/45 p-4 backdrop-blur-[2px]"
@@ -1642,7 +1848,7 @@ function EvidenceSection({
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="font-display text-xl font-black italic uppercase text-[#1a1814]">
-              File too large
+              Upload issue
             </h2>
             <p className="mt-3 text-sm text-[#444]">{sizeAlert}</p>
             <div className="mt-6 flex justify-end">
@@ -1654,93 +1860,159 @@ function EvidenceSection({
         </div>
       )}
 
-      <p className="text-sm text-[#666]">
-        Link each claim to a document: Claim → Evidence → Jury Score. Use{" "}
-        <span className="font-semibold">N/A</span> if a document is not available. PDF only · max{" "}
-        {MAX_UPLOAD_MB} MB per file.
-      </p>
+      <div className="border border-[var(--brand-gold)]/35 bg-[#faf6eb] px-4 py-3">
+        <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--brand-gold-dark)]">
+          Category-specific achievement &amp; evidence requirements
+        </p>
+        <p className="mt-1 font-display text-base font-black italic uppercase">
+          {categoryTitle}
+        </p>
+        <p className="mt-2 text-sm leading-relaxed text-[#555]">
+          Please provide relevant documents demonstrating your enterprise&apos;s achievements in
+          this award category. Equivalent supporting evidence may be accepted, subject to
+          verification. Cover all {requirements.length || 5} assessment areas (
+          {covered}/{requirements.length || 5} attached).
+        </p>
+        <p className="mt-2 text-xs text-[#777]">
+          PDF, JPG, PNG or XLSX · max {MAX_UPLOAD_MB} MB per file · Confidential
+        </p>
+      </div>
+
       {msg && (
         <p className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">{msg}</p>
       )}
-      {docs.map((d) => {
-        const key = d.id || d.name;
-        const busy = busyKey === key;
-        const isNa = d.fileName === "N/A";
-        return (
-          <div
-            key={key}
-            className="flex flex-wrap items-center justify-between gap-3 border border-black/10 bg-[#f7f4f2] px-4 py-3 text-sm"
-          >
-            <div className="min-w-0 flex-1">
-              <p className="font-medium">{d.name}</p>
-              <p className="text-xs text-[#666]">
-                {d.evidenceType} · Confidential
-                {isNa
-                  ? " · Marked N/A"
-                  : d.fileName
-                    ? ` · ${d.fileName}`
-                    : d.done === false
-                      ? " · Pending"
-                      : ""}
-              </p>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              {!isNa && (
-                <button
-                  type="button"
-                  className="btn-ghost !min-h-8 !px-2 !text-[10px]"
-                  disabled={busy}
-                  onClick={() => void markNa(key, d.name, d.evidenceType || "Other")}
+
+      {!requirements.length ? (
+        <p className="text-sm text-[#666]">No category evidence list found for this award.</p>
+      ) : (
+        slots.map(({ index, req, title, match }) => {
+          const busy = busyKey === title;
+          const isNa = match?.fileName === "N/A";
+          const done = Boolean(match?.fileName);
+          const note = notes[title] ?? match?.description ?? "";
+          const words = countWords(note);
+          return (
+            <div
+              key={title}
+              className={`border border-black/10 p-4 ${done ? "bg-white" : "bg-[#f7f4f2]"}`}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--brand-gold-dark)]">
+                    Evidence area {index + 1} of {requirements.length}
+                  </p>
+                  <h3 className="mt-1 font-display text-sm font-bold uppercase tracking-tight">
+                    {title}
+                  </h3>
+                  <p className="mt-1.5 text-sm leading-relaxed text-[#555]">{req.document}</p>
+                  <p className="mt-2 text-xs text-[#666]">
+                    <span className="font-semibold text-[#333]">Purpose: </span>
+                    {req.purpose}
+                  </p>
+                </div>
+                <span
+                  className={`shrink-0 text-[10px] font-bold uppercase tracking-[0.1em] ${
+                    done
+                      ? isNa
+                        ? "text-[#888]"
+                        : "text-[var(--brand-gold-dark)]"
+                      : "text-red-700"
+                  }`}
                 >
-                  N/A
-                </button>
-              )}
-              <label className="btn-ghost cursor-pointer !min-h-8 !px-2 !text-[10px]">
-                {busy ? "…" : isNa || d.done === false || !d.fileName ? "Upload" : "Replace"}
-                <input
-                  ref={(el) => {
-                    fileRefs.current[key] = el;
-                  }}
-                  type="file"
-                  accept=".pdf,application/pdf"
-                  className="sr-only"
-                  disabled={busy}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0] ?? null;
-                    e.target.value = "";
-                    void onPickFile(key, d.name, d.evidenceType || "Other", file);
-                  }}
-                />
+                  {done ? (isNa ? "N/A" : "Attached") : "Pending"}
+                </span>
+              </div>
+
+              <label className="label mt-4" htmlFor={`ev-note-${index}`}>
+                What achievement does this document demonstrate? (max 100 words)
               </label>
+              <textarea
+                id={`ev-note-${index}`}
+                className="input min-h-20"
+                value={note}
+                onChange={(e) =>
+                  setNotes((prev) => ({
+                    ...prev,
+                    [title]: e.target.value,
+                  }))
+                }
+                placeholder="Briefly explain what this file proves for this assessment area…"
+              />
+              <p
+                className={`mt-1 text-[11px] ${words > 100 ? "font-semibold text-red-700" : "text-[#888]"}`}
+              >
+                {words}/100 words
+              </p>
+
+              {match?.fileName && !isNa && (
+                <p className="mt-2 text-xs text-[#555]">
+                  File: <span className="font-medium">{match.fileName}</span>
+                </p>
+              )}
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                {!isNa && (
+                  <button
+                    type="button"
+                    className="btn-ghost !min-h-9 !text-[10px]"
+                    disabled={busy}
+                    onClick={() => void markNa(title)}
+                  >
+                    Mark N/A
+                  </button>
+                )}
+                <label className="btn-primary cursor-pointer !min-h-9 !text-[10px]">
+                  {busy ? "Uploading…" : done && !isNa ? "Replace file" : "Upload file"}
+                  <input
+                    ref={(el) => {
+                      fileRefs.current[title] = el;
+                    }}
+                    type="file"
+                    accept={EVIDENCE_ACCEPT}
+                    className="sr-only"
+                    disabled={busy}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] ?? null;
+                      e.target.value = "";
+                      void onPickFile(title, file);
+                    }}
+                  />
+                </label>
+              </div>
             </div>
-          </div>
-        );
-      })}
-      {!docs.length && (
-        <p className="text-sm text-[#666]">No documents yet — upload evidence below.</p>
+          );
+        })
       )}
-      <div className="flex flex-wrap gap-2">
-        <label className="btn-secondary inline-flex cursor-pointer">
-          {busyKey === "__new__" ? "Uploading…" : "Upload Evidence"}
-          <input
-            ref={uploadRef}
-            type="file"
-            accept=".pdf,application/pdf"
-            className="sr-only"
-            disabled={busyKey === "__new__"}
-            onChange={(e) => {
-              const file = e.target.files?.[0] ?? null;
-              e.target.value = "";
-              if (!file) return;
-              const base = file.name.replace(/\.[^.]+$/, "") || "Evidence";
-              void onPickFile("__new__", base, "Other", file);
-            }}
-          />
-        </label>
-        <Link href="/nominate/documents" className="btn-ghost inline-flex">
-          Manage all documents
-        </Link>
-      </div>
+
+      {category?.recommendedAdditional && (
+        <p className="text-xs leading-relaxed text-[#666]">
+          <span className="font-semibold text-[#333]">Recommended additional (optional): </span>
+          {category.recommendedAdditional}
+        </p>
+      )}
+      {category?.evidenceNotes?.map((note) => (
+        <p
+          key={note}
+          className="border border-[var(--brand-gold)]/30 bg-[#fff8e8] px-3 py-2 text-xs leading-relaxed text-[#555]"
+        >
+          <span className="font-semibold text-[#333]">Important: </span>
+          {note}
+        </p>
+      ))}
+      {category?.juryFocus && (
+        <p className="text-xs text-[#666]">
+          <span className="font-semibold text-[#333]">Jury focus: </span>
+          {category.juryFocus}
+        </p>
+      )}
+
+      <p className="text-xs text-[#888]">
+        Basic business documents (Udyam, PAN, GST, etc.) stay on the{" "}
+        <Link href="/nominate/documents" className="font-semibold text-[var(--brand-gold-dark)] underline">
+          Documents
+        </Link>{" "}
+        step — upload those once for all categories.
+      </p>
     </div>
   );
 }
@@ -1780,81 +2052,443 @@ function SystemDateTimeDisplay({ label = "Date & time" }: { label?: string }) {
   );
 }
 
-function DeclarationSection({ answers }: { answers: Answers }) {
-  const items = [
-    "Information provided is accurate to the best of my knowledge.",
-    "Supporting documents are authentic.",
-    "I am authorized to submit this application.",
-    "The Awards Secretariat may verify material claims.",
-    "Material legal/regulatory matters affecting eligibility have been disclosed.",
-    "I understand that false or misleading information may result in disqualification.",
-    "I accept the Award Rules & Regulations and Privacy Policy.",
-    "I understand that sponsorship does not influence award results.",
-  ];
+const DECLARATION_UNDERTAKINGS: { title: string; body: string }[] = [
+  {
+    title: "Authenticity",
+    body: "All information, statements, achievements and documents submitted are true, accurate and authentic to the best of my/our knowledge.",
+  },
+  {
+    title: "Eligibility",
+    body: "Our enterprise meets the applicable MSME classification, geographical eligibility and category-specific requirements of Mysuru MSME Awards 2026.",
+  },
+  {
+    title: "Statutory Compliance",
+    body: "Our enterprise maintains the registrations, licences and statutory compliances applicable to its business activities.",
+  },
+  {
+    title: "Supporting Evidence",
+    body: "All submitted financial, operational, customer, employee and category-specific evidence relates to genuine business activities and achievements.",
+  },
+  {
+    title: "Verification Consent",
+    body: "We authorize the Awards Secretariat to verify information, request clarifications or additional documents, and undertake reasonable verification procedures.",
+  },
+  {
+    title: "Independent Evaluation",
+    body: "We acknowledge that selection is based on published criteria, documentary evidence and independent jury assessment. Registration does not guarantee shortlisting or recognition.",
+  },
+  {
+    title: "Fair Participation",
+    body: "We understand that sponsorship, advertisements, partnerships or payments cannot influence jury decisions, rankings or award outcomes.",
+  },
+  {
+    title: "Confidentiality",
+    body: "We acknowledge that submitted information will be processed under the applicable Privacy Policy and may be shared with authorized evaluators and verification personnel for award assessment.",
+  },
+  {
+    title: "Publicity Consent",
+    body: "If shortlisted or recognised, we permit the use of approved business details, logos, photographs and achievements for legitimate awards-related publicity.",
+  },
+  {
+    title: "Conflict of Interest",
+    body: "We undertake to disclose any known material relationship or conflict involving the organizers, jury members or evaluation process.",
+  },
+  {
+    title: "Misrepresentation",
+    body: "We understand that false declarations, fabricated evidence, concealment of material facts or attempts to influence the jury may result in rejection, disqualification or withdrawal of recognition.",
+  },
+  {
+    title: "Acceptance of Rules",
+    body: "We confirm that we have read, understood and agree to comply with the official Award Rules & Regulations, Integrity Charter and applicable terms of Mysuru MSME Awards 2026.",
+  },
+];
+
+function DeclarationSection({
+  answers,
+  categoryTitle,
+  applicationId,
+  canSubmit = false,
+  confirm,
+  scorecard = [],
+  otherCategories = [],
+  buildSubmitPayload,
+  onSubmitted,
+}: {
+  answers: Answers;
+  categoryTitle: string;
+  applicationId: string;
+  canSubmit?: boolean;
+  confirm?: (options: {
+    title?: string;
+    message: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+  }) => Promise<boolean>;
+  scorecard?: { name: string; points: number }[];
+  otherCategories?: { applicationId: string; categoryTitle: string; status: string }[];
+  buildSubmitPayload?: () => Promise<{
+    step: number;
+    answers: Answers;
+    documents: unknown[];
+    savedAt: string;
+    submittedFromReview: boolean;
+  }>;
+  onSubmitted?: (status: string) => void;
+}) {
+  const pageProcess = usePageProcess();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [successOpen, setSuccessOpen] = useState(false);
+  const [successDetail, setSuccessDetail] = useState("");
+  const [nextScorecard, setNextScorecard] = useState<{
+    applicationId: string;
+    categoryTitle: string;
+  } | null>(null);
+  const [company, setCompany] = useState<{
+    legalName: string;
+    brandName: string;
+    nature: string;
+    udyam: string;
+    classification: string;
+    repName: string;
+    repDesignation: string;
+    repMobile: string;
+    repEmail: string;
+  } | null>(null);
+  const [profileLoaded, setProfileLoaded] = useState(false);
+
+  useEffect(() => {
+    apiGet<{ profile: BusinessProfile | null }>("/api/profile")
+      .then((d) => {
+        const p = d.profile;
+        if (!p) {
+          setCompany(null);
+          return;
+        }
+        setCompany({
+          legalName: p.legalName || "—",
+          brandName: p.brandName || "—",
+          nature: [p.industry, p.activity].filter(Boolean).join(" · ") || "—",
+          udyam: p.udyam || "—",
+          classification: p.classification || "—",
+          repName: p.repName || "—",
+          repDesignation: p.repDesignation || "—",
+          repMobile: p.repMobile || "—",
+          repEmail: p.repEmail || "—",
+        });
+      })
+      .catch(() => setCompany(null))
+      .finally(() => setProfileLoaded(true));
+  }, []);
 
   const previouslyAgreed =
     answers.decl_agree === "yes" ||
-    items.every((_, i) => answers[`decl_${i}`] === "yes");
+    DECLARATION_UNDERTAKINGS.every((_, i) => answers[`decl_${i}`] === "yes");
+
+  const classLower = (company?.classification || "").toLowerCase();
+  const detailRows: [string, string][] = [
+    ["Registered Company / Business Name", company?.legalName || "—"],
+    ["Business / Brand Name", company?.brandName || "—"],
+    ["Nature of Business", company?.nature || "—"],
+    ["Udyam Registration Number", company?.udyam || "—"],
+    [
+      "MSME Classification",
+      company
+        ? ["Micro", "Small", "Medium"]
+            .map((c) => (classLower.includes(c.toLowerCase()) ? `☑ ${c}` : `☐ ${c}`))
+            .join("   ")
+        : "☐ Micro   ☐ Small   ☐ Medium",
+    ],
+    ["Award Category Applied For", categoryTitle],
+    [
+      "Authorized Representative & Designation",
+      company
+        ? [company.repName, company.repDesignation].filter((x) => x && x !== "—").join(" · ") ||
+          "—"
+        : "—",
+    ],
+    [
+      "Mobile Number & Email",
+      company
+        ? [company.repMobile, company.repEmail].filter((x) => x && x !== "—").join(" · ") || "—"
+        : "—",
+    ],
+    ["Application / Registration ID", applicationId],
+  ];
 
   return (
-    <div className="mt-4 space-y-4 text-sm">
-      <p className="text-[#666]">Please read all declarations carefully before confirming.</p>
-      <ol className="list-decimal space-y-2 border border-black/10 bg-[#f7f4f2] px-5 py-4 pl-9">
-        {items.map((d) => (
-          <li key={d} className="leading-relaxed text-[#333]">
-            {d}
-          </li>
-        ))}
-      </ol>
-      <label className="flex items-start gap-3 border border-black/10 bg-white px-4 py-3">
-        <input
-          type="checkbox"
-          name="decl_agree"
-          required
-          defaultChecked={previouslyAgreed}
-          className="mt-1 h-4 w-4 shrink-0"
-        />
-        <span className="font-semibold">
-          I have read and agree to all of the above declarations. *
-        </span>
-      </label>
-      <div className="grid gap-3 pt-2 sm:grid-cols-2">
-        <div>
-          <label className="label" htmlFor="decl_signatory">
-            Authorized Signatory Name *
-          </label>
-          <input
-            id="decl_signatory"
-            name="decl_signatory"
-            className="input"
-            defaultValue={answers.decl_signatory || ""}
-            required
-          />
-        </div>
-        <div>
-          <label className="label" htmlFor="decl_designation">
-            Designation
-          </label>
-          <input
-            id="decl_designation"
-            name="decl_designation"
-            className="input"
-            defaultValue={answers.decl_designation || ""}
-          />
-        </div>
-        <div>
-          <label className="label" htmlFor="decl_place">
-            Place
-          </label>
-          <input
-            id="decl_place"
-            name="decl_place"
-            className="input"
-            defaultValue={answers.decl_place || ""}
-          />
-        </div>
-        <SystemDateTimeDisplay label="Date & time (system)" />
+    <div className="mt-4 space-y-6 text-sm">
+      <div className="border border-[var(--brand-gold)]/35 bg-gradient-to-r from-[#1a0a0e] via-[#2a1218] to-[#1a0a0e] px-4 py-5 text-white sm:px-6">
+        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--brand-gold)]">
+          Mysuru MSME Awards 2026
+        </p>
+        <h3 className="mt-1.5 font-display text-xl font-black italic uppercase tracking-tight sm:text-2xl">
+          Business Declaration &amp; Undertaking
+        </h3>
+        <p className="mt-2 text-sm text-white/70">
+          Recognizing Excellence. Enabling Growth. Inspiring Tomorrow.
+        </p>
+        <p className="mt-1 text-[11px] text-white/50">
+          Powered by Toya Corporate Consulting Services Pvt. Ltd.
+        </p>
       </div>
+
+      <section>
+        <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--brand-gold-dark)]">
+          1. Company details
+        </p>
+        <p className="mt-1 text-xs text-[#888]">
+          Prefills from your Business Profile and this application after details are filled.{" "}
+          <Link href="/nominate/profile" className="font-semibold text-[var(--brand-gold-dark)] underline">
+            Edit profile
+          </Link>
+        </p>
+        <div className="mt-3 overflow-x-auto border border-black/10">
+          <table className="w-full min-w-[20rem] border-collapse text-left">
+            <thead className="bg-[#1a0c10] text-white">
+              <tr>
+                <th className="w-[42%] px-3 py-2.5 text-[10px] font-bold uppercase tracking-[0.12em]">
+                  Particulars
+                </th>
+                <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-[0.12em]">
+                  Details
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {detailRows.map(([label, value]) => (
+                <tr key={label} className="border-t border-black/10 odd:bg-[#f7f4f2] even:bg-white">
+                  <td className="px-3 py-2.5 align-top text-[12px] font-semibold text-[#444]">
+                    {label}
+                  </td>
+                  <td className="px-3 py-2.5 align-top text-[13px] leading-snug text-[#222] whitespace-pre-wrap">
+                    {value}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--brand-gold-dark)]">
+          2. Declaration &amp; undertaking
+        </p>
+        <p className="mt-2 leading-relaxed text-[#555]">
+          I/We, the undersigned authorized representative of the above-mentioned enterprise, hereby
+          declare, confirm and undertake that:
+        </p>
+        <ol className="mt-3 list-decimal space-y-3 border border-black/10 bg-[#f7f4f2] px-5 py-4 pl-9">
+          {DECLARATION_UNDERTAKINGS.map((item) => (
+            <li key={item.title} className="leading-relaxed text-[#333]">
+              <span className="font-semibold">{item.title}: </span>
+              {item.body}
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <section>
+        <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--brand-gold-dark)]">
+          3. Authorized confirmation
+        </p>
+        <p className="mt-2 leading-relaxed text-[#555]">
+          I/We voluntarily submit this application and accept responsibility for the accuracy and
+          authenticity of the information provided.
+        </p>
+        <label className="mt-4 flex items-start gap-3 border border-black/10 bg-white px-4 py-3">
+          <input
+            type="checkbox"
+            name="decl_agree"
+            required
+            defaultChecked={previouslyAgreed}
+            className="mt-1 h-4 w-4 shrink-0"
+          />
+          <span className="font-semibold">
+            I have read and agree to all of the above declarations and undertakings. *
+          </span>
+        </label>
+        {profileLoaded ? (
+          <div key="decl-confirm-fields" className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="label" htmlFor="decl_signatory">
+                Name &amp; Designation — Authorized Signatory *
+              </label>
+              <input
+                id="decl_signatory"
+                name="decl_signatory"
+                className="input"
+                defaultValue={
+                  answers.decl_signatory ||
+                  (company && company.repName !== "—" ? company.repName : "")
+                }
+                required
+              />
+            </div>
+            <div>
+              <label className="label" htmlFor="decl_designation">
+                Designation
+              </label>
+              <input
+                id="decl_designation"
+                name="decl_designation"
+                className="input"
+                defaultValue={
+                  answers.decl_designation ||
+                  (company && company.repDesignation !== "—" ? company.repDesignation : "")
+                }
+              />
+            </div>
+            <div>
+              <label className="label" htmlFor="decl_place">
+                Place &amp; Date — Place
+              </label>
+              <input
+                id="decl_place"
+                name="decl_place"
+                className="input"
+                defaultValue={answers.decl_place || ""}
+              />
+            </div>
+            <SystemDateTimeDisplay label="Place & Date — Date & time (system)" />
+          </div>
+        ) : (
+          <p className="mt-4 text-xs text-[#888]">Loading company details…</p>
+        )}
+        <p className="mt-3 text-xs text-[#888]">
+          Signature &amp; company seal are recorded digitally via this confirmation at submission.
+          Physical wet-ink signature is not required on the portal.
+        </p>
+        <p className="mt-4 border-t border-black/10 pt-3 text-[10px] font-bold uppercase tracking-[0.12em] text-[#888]">
+          Mysuru MSME Awards 2026 · Awards Secretariat · Powered by Toya Corporate Consulting
+          Services Pvt. Ltd.
+        </p>
+      </section>
+
+      {canSubmit && confirm && buildSubmitPayload && onSubmitted && (
+        <div className="space-y-3 border border-black/10 bg-[#f7f4f2] p-4">
+          <p className="text-sm text-[#555]">
+            After you agree above, submit this nomination for eligibility review. Major details
+            cannot be edited afterwards unless the Awards Secretariat reopens it.
+          </p>
+          {error && (
+            <p className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>
+          )}
+          <button
+            type="button"
+            className="btn-primary w-full sm:w-auto"
+            disabled={busy}
+            onClick={async () => {
+              const agree = document.querySelector<HTMLInputElement>('input[name="decl_agree"]');
+              const signatory = document.querySelector<HTMLInputElement>("#decl_signatory");
+              if (!agree?.checked || !String(signatory?.value || "").trim()) {
+                setError("Please agree to the declaration and enter the authorized signatory name.");
+                return;
+              }
+              const draftSiblings = otherCategories.filter((c) => c.status === "DRAFT");
+              const nextDraft = draftSiblings[0] || null;
+              const ok = await confirm({
+                title: "Are you sure?",
+                message: otherCategories.length
+                  ? `Submit the “${categoryTitle}” scorecard for eligibility review? Shared organisation answers stay synced. ${
+                      nextDraft
+                        ? `Afterwards you can complete the scorecard for “${nextDraft.categoryTitle}”.`
+                        : "If another category is still in draft, open its scorecard next."
+                    }`
+                  : "Submit this application for eligibility review? Your answers, declaration, and uploaded document list will be saved to the database first.",
+                confirmLabel: "Yes, submit",
+                cancelLabel: "Cancel",
+              });
+              if (!ok) return;
+              setBusy(true);
+              setError("");
+              pageProcess.begin("Submitting application…");
+              try {
+                const draftJson = await buildSubmitPayload();
+                const missing = missingNominationFields(
+                  draftJson.answers || {},
+                  scorecard.length,
+                );
+                if (missing.length) {
+                  setError(
+                    `Please complete all sections before submit. Still missing: ${missing.slice(0, 5).join(", ")}${missing.length > 5 ? "…" : ""}`,
+                  );
+                  setBusy(false);
+                  pageProcess.end();
+                  return;
+                }
+                const docsCheck = await apiGet<{
+                  completeCount: number;
+                  totalMandatory: number;
+                  mandatory: { name: string; done: boolean }[];
+                }>("/api/documents");
+                if (
+                  docsCheck.totalMandatory > 0 &&
+                  docsCheck.completeCount < docsCheck.totalMandatory
+                ) {
+                  const pending = (docsCheck.mandatory || [])
+                    .filter((m) => !m.done)
+                    .map((m) => m.name);
+                  setError(
+                    `Complete remaining documents first (${docsCheck.completeCount}/${docsCheck.totalMandatory}). Pending: ${pending.join(", ")}.`,
+                  );
+                  setBusy(false);
+                  pageProcess.end();
+                  return;
+                }
+                const res = await apiPost<{ application: { status: string } }>(
+                  `/api/applications/${applicationId}/submit`,
+                  { draftJson },
+                );
+                onSubmitted(res.application.status);
+                setNextScorecard(
+                  nextDraft
+                    ? {
+                        applicationId: nextDraft.applicationId,
+                        categoryTitle: nextDraft.categoryTitle,
+                      }
+                    : null,
+                );
+                setSuccessDetail(
+                  nextDraft
+                    ? `“${categoryTitle}” is in Eligibility Review. Next: complete the scorecard for “${nextDraft.categoryTitle}”.`
+                    : `Nomination submitted for Eligibility Review.`,
+                );
+                setSuccessOpen(true);
+                pageProcess.end();
+              } catch (e) {
+                setError(e instanceof Error ? e.message : "Submit failed — nothing was finalized");
+                pageProcess.end();
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {busy ? "Please wait…" : `Submit · ${categoryTitle}`}
+          </button>
+          {successOpen && (
+            <div className="border border-[var(--brand-gold)]/40 bg-white px-4 py-3 text-sm">
+              <p className="font-semibold text-[#1a0c10]">Submitted</p>
+              <p className="mt-1 text-[#555]">{successDetail}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {nextScorecard ? (
+                  <Link
+                    href={`/nominate/applications/${nextScorecard.applicationId}?focus=scorecard`}
+                    className="btn-primary"
+                  >
+                    Next scorecard →
+                  </Link>
+                ) : (
+                  <Link href="/nominate/dashboard" className="btn-primary">
+                    Back to Account
+                  </Link>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1870,6 +2504,8 @@ function ReviewSection({
   onEditStep,
   buildSubmitPayload,
   onSubmitted,
+  reviewOnly = false,
+  onContinueToDeclaration,
 }: {
   applicationId: string;
   categoryTitle: string;
@@ -1892,7 +2528,11 @@ function ReviewSection({
     submittedFromReview: boolean;
   }>;
   onSubmitted: (status: string) => void;
+  /** When true, show continue to Declaration instead of final submit. */
+  reviewOnly?: boolean;
+  onContinueToDeclaration?: () => void;
 }) {
+  const pageProcess = usePageProcess();
   const [busy, setBusy] = useState(false);
   const [successOpen, setSuccessOpen] = useState(false);
   const [successDetail, setSuccessDetail] = useState("");
@@ -2095,7 +2735,7 @@ function ReviewSection({
 
           <SheetSection
             title="7. Declaration"
-            onEdit={canEdit ? () => void requestEdit("Declaration", 9) : undefined}
+            onEdit={canEdit ? () => void requestEdit("Declaration", 10) : undefined}
           >
             <SheetGrid
               rows={[
@@ -2117,8 +2757,9 @@ function ReviewSection({
       </div>
 
       <div className="border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-        Ready to Submit? Once submitted, major application information cannot be edited unless the
-        Awards Secretariat formally reopens the application.
+        {reviewOnly
+          ? "Review your nomination summary, then continue to the Declaration form to confirm and submit."
+          : "Ready to Submit? Once submitted, major application information cannot be edited unless the Awards Secretariat formally reopens the application."}
       </div>
       {error && (
         <div className="space-y-2 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
@@ -2144,7 +2785,16 @@ function ReviewSection({
         <Link href="/nominate/dashboard" className="btn-secondary">
           Back to Dashboard
         </Link>
-        {canEdit && (
+        {canEdit && reviewOnly && (
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => onContinueToDeclaration?.()}
+          >
+            Continue to Declaration →
+          </button>
+        )}
+        {canEdit && !reviewOnly && (
           <button
             type="button"
             className="btn-primary"
@@ -2168,6 +2818,7 @@ function ReviewSection({
               setBusy(true);
               setError("");
               setMissingFix(null);
+              pageProcess.begin("Submitting application…");
               try {
                 const draftJson = await buildSubmitPayload();
                 const missing = missingNominationFields(
@@ -2185,6 +2836,7 @@ function ReviewSection({
                     `Please complete all sections before submit. Still missing: ${missing.slice(0, 5).join(", ")}${missing.length > 5 ? "…" : ""}`,
                   );
                   setBusy(false);
+                  pageProcess.end();
                   return;
                 }
                 const docsCheck = await apiGet<{
@@ -2204,6 +2856,7 @@ function ReviewSection({
                     `Complete remaining documents first (${docsCheck.completeCount}/${docsCheck.totalMandatory}). Pending: ${pending.join(", ")}. Upload on Documents, then return here.`,
                   );
                   setBusy(false);
+                  pageProcess.end();
                   return;
                 }
                 const res = await apiPost<{ application: { status: string } }>(
@@ -2229,8 +2882,10 @@ function ReviewSection({
                     : `All details are stored. ${answerCount} form fields and ${docCount} document record${docCount === 1 ? "" : "s"} saved. Status: Eligibility Review.`,
                 );
                 setSuccessOpen(true);
+                pageProcess.end();
               } catch (e) {
                 setError(e instanceof Error ? e.message : "Submit failed — nothing was finalized");
+                pageProcess.end();
               } finally {
                 setBusy(false);
               }
@@ -2240,8 +2895,6 @@ function ReviewSection({
           </button>
         )}
       </div>
-
-      {busy && <ProcessOverlay open={busy} />}
 
       {successOpen && (
         <div

@@ -1,3 +1,8 @@
+export type CategoryEvidenceItem = {
+  document: string;
+  purpose: string;
+};
+
 export type AwardCategory = {
   slug: string;
   code: string;
@@ -9,10 +14,25 @@ export type AwardCategory = {
   eligibility: string[];
   whoShouldApply: string[];
   criteria: { name: string; points: number }[];
+  /** Category-specific achievement & evidence requirements (5 areas). */
+  supportingEvidence: CategoryEvidenceItem[];
+  /** @deprecated Prefer supportingEvidence — short document titles for compact UI. */
   evidence: string[];
+  evidenceNotes?: string[];
+  recommendedAdditional?: string;
+  juryFocus?: string;
   recognition: string[];
   directApply: boolean;
 };
+
+function withEvidenceLabels(
+  items: CategoryEvidenceItem[],
+): Pick<AwardCategory, "supportingEvidence" | "evidence"> {
+  return {
+    supportingEvidence: items,
+    evidence: items.map((i) => i.document),
+  };
+}
 
 export const awardCategories: AwardCategory[] = [
   {
@@ -43,10 +63,37 @@ export const awardCategories: AwardCategory[] = [
       { name: "Sustainability & Social Impact", points: 10 },
       { name: "Leadership & Future Readiness", points: 10 },
     ],
-    evidence: [
-      "Cross-category performance dossier",
-      "Verification and conflict clearance pack",
-      "Grand Jury presentation materials (finalists)",
+    ...withEvidenceLabels([
+      {
+        document:
+          "Three-Year Business Performance Report showing turnover, profitability and major business achievements, supported by financial records",
+        purpose: "Establishes consistent overall performance",
+      },
+      {
+        document:
+          "Business Growth & Expansion Report with evidence of new markets, customers, branches, capacity or product lines",
+        purpose: "Demonstrates sustainable growth",
+      },
+      {
+        document:
+          "Innovation & Competitive Advantage Portfolio containing implemented improvements, product developments or technology initiatives",
+        purpose: "Establishes differentiation and innovation",
+      },
+      {
+        document:
+          "Employment & People Development Report with workforce growth, training initiatives and employment contributions",
+        purpose: "Demonstrates people and economic impact",
+      },
+      {
+        document:
+          "Corporate Governance & Social Impact Report covering internal controls, responsible practices and measurable community/environmental initiatives",
+        purpose: "Evaluates responsible leadership and wider impact",
+      },
+    ]),
+    evidenceNotes: [
+      "MSME of the Year is qualification-based and does not accept direct nominations.",
+      "These documents should be requested only from enterprises shortlisted for Grand Jury consideration.",
+      "Existing evidence from primary-category applications should be reused wherever possible.",
     ],
     recognition: ["Winner", "MSME of the Year Finalists (up to five)"],
     directApply: false,
@@ -81,12 +128,36 @@ export const awardCategories: AwardCategory[] = [
       { name: "Workforce Development", points: 5 },
       { name: "Growth & Market Performance", points: 10 },
     ],
-    evidence: [
-      "Production / efficiency reports",
-      "Quality certifications and audit records",
-      "Safety and compliance documentation",
-      "Investment and capacity expansion proof",
-    ],
+    ...withEvidenceLabels([
+      {
+        document:
+          "Production Performance Report showing production volume, capacity utilisation and productivity improvements over the last 2–3 years",
+        purpose: "Measures manufacturing efficiency",
+      },
+      {
+        document:
+          "Quality Assurance & Control Records, such as inspection reports, rejection rates, defect trends or ISO audit findings",
+        purpose: "Establishes product quality and consistency",
+      },
+      {
+        document:
+          "Process Improvement / Automation Report with before-and-after results of implemented improvements",
+        purpose: "Demonstrates operational innovation",
+      },
+      {
+        document:
+          "Machinery & Technology Investment Records, such as equipment purchase invoices, commissioning records or implementation reports",
+        purpose: "Verifies manufacturing modernisation",
+      },
+      {
+        document:
+          "Workplace Safety & Operational Compliance Records, including safety audits, training records and applicable factory/environmental compliance evidence",
+        purpose: "Establishes safe and responsible operations",
+      },
+    ]),
+    recommendedAdditional:
+      "Lean manufacturing certifications, Six Sigma projects, customer quality awards, energy-efficiency improvements or production-efficiency case studies.",
+    juryFocus: "Productivity, quality, process innovation, operational efficiency and safety.",
     recognition: ["Winner", "1st Runner-Up", "2nd Runner-Up", "Official Finalist", "Official Finalist"],
     directApply: true,
   },
@@ -117,11 +188,37 @@ export const awardCategories: AwardCategory[] = [
       { name: "Growth & Market Reach", points: 10 },
       { name: "Compliance & Governance", points: 10 },
     ],
-    evidence: [
-      "Customer feedback / NPS / testimonials",
-      "SLA or delivery metrics",
-      "Process documentation",
-    ],
+    ...withEvidenceLabels([
+      {
+        document:
+          "Customer Satisfaction Report supported by customer surveys, verified ratings, feedback summaries or NPS data",
+        purpose: "Evaluates customer experience",
+      },
+      {
+        document:
+          "Client Retention & Repeat Business Report showing repeat customers, renewals or long-term client relationships",
+        purpose: "Demonstrates service consistency",
+      },
+      {
+        document:
+          "Service Delivery Performance Report with turnaround times, service-level compliance, response times or completion rates",
+        purpose: "Measures operational performance",
+      },
+      {
+        document:
+          "Customer Testimonials / Appreciation Letters, preferably dated and independently verifiable",
+        purpose: "Supports service quality claims",
+      },
+      {
+        document:
+          "Service Improvement & Innovation Report showing improvements to service processes, technology, training or customer experience",
+        purpose: "Establishes continuous improvement",
+      },
+    ]),
+    recommendedAdditional:
+      "Client contracts with sensitive terms redacted, service audit reports, complaint-resolution records, customer-experience certifications and service-quality awards.",
+    juryFocus:
+      "Customer satisfaction, service quality, retention, innovation and operational excellence.",
     recognition: ["Winner", "1st Runner-Up", "2nd Runner-Up", "Official Finalist", "Official Finalist"],
     directApply: true,
   },
@@ -152,11 +249,37 @@ export const awardCategories: AwardCategory[] = [
       { name: "Market Opportunity", points: 10 },
       { name: "Governance Basics", points: 10 },
     ],
-    evidence: [
-      "Incorporation / commencement proof",
-      "Early revenue / customer traction evidence",
-      "Product or service differentiation materials",
-    ],
+    ...withEvidenceLabels([
+      {
+        document:
+          "Business Model & Value Proposition Report explaining the problem addressed, target customers, revenue model and competitive differentiation",
+        purpose: "Evaluates business viability",
+      },
+      {
+        document:
+          "Market Traction Report supported by sales invoices, customer acquisition records, orders or subscription data",
+        purpose: "Verifies actual market acceptance",
+      },
+      {
+        document:
+          "Business Growth Report Since Commencement showing revenue, customer growth and operational milestones",
+        purpose: "Establishes early business performance",
+      },
+      {
+        document:
+          "Product / Service Validation Evidence, such as pilot results, customer acceptance letters, purchase orders or completed projects",
+        purpose: "Demonstrates commercial validation",
+      },
+      {
+        document:
+          "Business Scalability & Expansion Plan supported by capacity plans, market research, pipeline evidence or implementation milestones",
+        purpose: "Evaluates realistic future potential",
+      },
+    ]),
+    recommendedAdditional:
+      "Incubation completion certificates, accelerator participation, grants, startup competition recognition, investor commitments or product launch records.",
+    juryFocus:
+      "Market traction, differentiation, scalability, founder capability and financial sustainability.",
     recognition: ["Winner", "1st Runner-Up", "2nd Runner-Up", "Official Finalist", "Official Finalist"],
     directApply: true,
   },
@@ -186,11 +309,37 @@ export const awardCategories: AwardCategory[] = [
       { name: "Capability & Talent", points: 10 },
       { name: "Risk, Security & Governance", points: 10 },
     ],
-    evidence: [
-      "Innovation case studies",
-      "Patents / certifications where applicable",
-      "Before-after performance metrics",
+    ...withEvidenceLabels([
+      {
+        document:
+          "Innovation Project Report describing the problem, proposed solution, development process and implementation",
+        purpose: "Establishes the innovation",
+      },
+      {
+        document:
+          "Technology Implementation Evidence, such as deployment reports, system screenshots, commissioning certificates or implementation records",
+        purpose: "Verifies practical adoption",
+      },
+      {
+        document:
+          "Before-and-After Impact Analysis demonstrating cost savings, productivity gains, time reduction, quality improvement or revenue impact",
+        purpose: "Measures tangible results",
+      },
+      {
+        document:
+          "Product / Technology Validation Report, including pilot results, testing certificates, user acceptance reports or independent technical assessments",
+        purpose: "Demonstrates functionality and reliability",
+      },
+      {
+        document:
+          "Intellectual Property or Innovation Ownership Evidence, such as patent filings, registered designs, software ownership declarations or documented original development",
+        purpose: "Establishes ownership or legitimate use of innovation",
+      },
+    ]),
+    evidenceNotes: [
+      "A patent should not be mandatory. Genuine process innovation, automation, AI implementation and business-model innovation may be eligible without registered intellectual property.",
     ],
+    juryFocus: "Originality, implementation, measurable impact, adoption and scalability.",
     recognition: ["Winner", "1st Runner-Up", "2nd Runner-Up", "Official Finalist", "Official Finalist"],
     directApply: true,
   },
@@ -220,11 +369,37 @@ export const awardCategories: AwardCategory[] = [
       { name: "Sustainability of Growth", points: 15 },
       { name: "Governance & Risk Discipline", points: 15 },
     ],
-    evidence: [
-      "Three-year financial performance",
-      "Market expansion proof",
-      "Investment and hiring evidence",
-    ],
+    ...withEvidenceLabels([
+      {
+        document:
+          "Three-Year Revenue Growth Statement supported by audited financial statements, CA-certified figures or equivalent reliable records",
+        purpose: "Verifies revenue growth",
+      },
+      {
+        document:
+          "Profitability & Financial Sustainability Report showing profit margins, operating performance and financial stability",
+        purpose: "Evaluates quality of growth",
+      },
+      {
+        document:
+          "Customer & Market Expansion Report supported by customer acquisition records, new market sales or distribution agreements",
+        purpose: "Demonstrates market expansion",
+      },
+      {
+        document:
+          "Business Capacity Expansion Evidence, including machinery investments, new facilities, branch openings or workforce expansion records",
+        purpose: "Verifies operational scaling",
+      },
+      {
+        document:
+          "Growth Strategy & Achievement Report documenting growth initiatives, milestones, outcomes and future sustainability",
+        purpose: "Evaluates how growth was achieved",
+      },
+    ]),
+    recommendedAdditional:
+      "Export records, major contracts, distribution agreements, new product launches and employment growth reports.",
+    juryFocus:
+      "Sustainable revenue growth, profitability, market expansion, employment and operational scalability.",
     recognition: ["Winner", "1st Runner-Up", "2nd Runner-Up", "Official Finalist", "Official Finalist"],
     directApply: true,
   },
@@ -254,11 +429,39 @@ export const awardCategories: AwardCategory[] = [
       { name: "Resilience & Governance", points: 15 },
       { name: "Contribution to Mysuru", points: 10 },
     ],
-    evidence: [
-      "Leadership / ownership documentation",
-      "Business performance evidence",
-      "Impact narratives with proof",
+    ...withEvidenceLabels([
+      {
+        document:
+          "Ownership & Leadership Evidence, such as shareholding records, partnership deed extracts or directorship records showing substantial ownership and active involvement",
+        purpose: "Verifies entrepreneurial leadership",
+      },
+      {
+        document:
+          "Entrepreneurial Journey & Achievement Report outlining business establishment, challenges overcome and significant milestones",
+        purpose: "Evaluates entrepreneurial achievement",
+      },
+      {
+        document:
+          "Business Performance & Growth Report supported by sales records, financial summaries and expansion achievements",
+        purpose: "Demonstrates business success",
+      },
+      {
+        document:
+          "Leadership & Team Development Evidence, including organizational responsibilities, team development initiatives and employment contributions",
+        purpose: "Establishes active leadership",
+      },
+      {
+        document:
+          "Innovation, Market Impact or Community Contribution Report supported by implemented initiatives, customer outcomes or community project records",
+        purpose: "Demonstrates wider contribution",
+      },
+    ]),
+    recommendedAdditional:
+      "Leadership recognition, industry awards, mentoring initiatives, women-employment programs and verified media coverage.",
+    evidenceNotes: [
+      "The applicant must demonstrate meaningful entrepreneurial ownership and leadership. Merely having a woman listed as a director should not automatically qualify an enterprise.",
     ],
+    juryFocus: "Leadership, business achievement, growth, resilience and entrepreneurial impact.",
     recognition: ["Winner", "1st Runner-Up", "2nd Runner-Up", "Official Finalist", "Official Finalist"],
     directApply: true,
   },
@@ -276,9 +479,7 @@ export const awardCategories: AwardCategory[] = [
       "Active founder / promoter / leadership role",
       "Valid Udyam Registration and Mysuru operations",
     ],
-    whoShouldApply: [
-      "Young founders and business leaders with proven achievement",
-    ],
+    whoShouldApply: ["Young founders and business leaders with proven achievement"],
     criteria: [
       { name: "Entrepreneurial Achievement", points: 25 },
       { name: "Business Traction", points: 20 },
@@ -287,11 +488,40 @@ export const awardCategories: AwardCategory[] = [
       { name: "Scalability Potential", points: 15 },
       { name: "Mysuru Contribution", points: 10 },
     ],
-    evidence: [
-      "Age / identity proof for nominee",
-      "Leadership role evidence",
-      "Business achievement evidence",
+    ...withEvidenceLabels([
+      {
+        document:
+          "Entrepreneur Age Verification Document, such as an appropriate government-issued proof of date of birth",
+        purpose: "Confirms age eligibility",
+      },
+      {
+        document:
+          "Founder / Ownership / Leadership Evidence, including incorporation records, shareholding extracts, partnership records or documented management responsibility",
+        purpose: "Establishes genuine entrepreneurial involvement",
+      },
+      {
+        document:
+          "Business Achievement & Performance Report supported by revenue, customer growth, project delivery or business milestone evidence",
+        purpose: "Measures entrepreneurial results",
+      },
+      {
+        document:
+          "Innovation & Business Development Portfolio showing new products, services, technology adoption or market development initiatives",
+        purpose: "Demonstrates innovation and initiative",
+      },
+      {
+        document:
+          "Leadership & Business Expansion Report documenting team building, employment creation, strategic decisions and measurable expansion outcomes",
+        purpose: "Evaluates leadership and growth potential",
+      },
+    ]),
+    recommendedAdditional:
+      "Startup recognition, accelerator participation, awards, innovation grants, customer acquisition milestones and business expansion records.",
+    evidenceNotes: [
+      "Date-of-birth evidence is a category-specific eligibility document. It should be treated as confidential and collected only when necessary.",
     ],
+    juryFocus:
+      "Entrepreneurial achievement, innovation, leadership, business performance and scalability.",
     recognition: ["Winner", "1st Runner-Up", "2nd Runner-Up", "Official Finalist", "Official Finalist"],
     directApply: true,
   },
@@ -321,11 +551,40 @@ export const awardCategories: AwardCategory[] = [
       { name: "Governance & Transparency", points: 10 },
       { name: "Scalability / Continuity", points: 10 },
     ],
-    evidence: [
-      "Impact metrics and reports",
-      "Certifications where applicable",
-      "Community / environment programme proof",
+    ...withEvidenceLabels([
+      {
+        document:
+          "Sustainability / Social Impact Project Report describing the initiative, objectives, beneficiaries and implementation period",
+        purpose: "Establishes the initiative",
+      },
+      {
+        document:
+          "Measurable Impact Assessment Report showing environmental improvements or social outcomes with baseline and current measurements",
+        purpose: "Verifies actual impact",
+      },
+      {
+        document:
+          "Environmental or Community Initiative Records, such as waste-management records, energy-saving reports, beneficiary registers or program completion reports",
+        purpose: "Supports implementation claims",
+      },
+      {
+        document:
+          "Project Investment & Resource Allocation Evidence, including project expenditure statements, invoices, contribution records or resource-utilisation reports",
+        purpose: "Demonstrates sustained commitment",
+      },
+      {
+        document:
+          "Independent Validation / Beneficiary Feedback Evidence, such as third-party assessments, beneficiary testimonials, institutional acknowledgements or relevant certifications",
+        purpose: "Strengthens credibility of reported impact",
+      },
+    ]),
+    recommendedAdditional:
+      "Renewable-energy generation reports, water conservation records, waste-reduction data, community development partnerships and environmental audit findings.",
+    evidenceNotes: [
+      "Businesses should not need expensive ESG certifications to participate. Smaller MSMEs may demonstrate credible, measurable impact through operational records and independently verifiable outcomes.",
     ],
+    juryFocus:
+      "Measurable impact, continuity, responsible practices, innovation and contribution relative to enterprise size.",
     recognition: ["Winner", "1st Runner-Up", "2nd Runner-Up", "Official Finalist", "Official Finalist"],
     directApply: true,
   },
@@ -355,11 +614,40 @@ export const awardCategories: AwardCategory[] = [
       { name: "Retention & Engagement", points: 15 },
       { name: "People Governance", points: 15 },
     ],
-    evidence: [
-      "HR policies and programmes",
-      "Training / safety records",
-      "Employee engagement evidence",
+    ...withEvidenceLabels([
+      {
+        document:
+          "Employee Strength & Retention Report showing workforce numbers, hiring, attrition and retention trends for the last 2–3 years",
+        purpose: "Measures employment stability",
+      },
+      {
+        document:
+          "Employee Training & Development Records, including training calendars, attendance records, certification summaries and skill-development initiatives",
+        purpose: "Evaluates workforce development",
+      },
+      {
+        document:
+          "Employee Welfare & Benefits Documentation, including leave policies, insurance coverage, welfare initiatives and applicable employee benefit records",
+        purpose: "Establishes employee support",
+      },
+      {
+        document:
+          "Employee Satisfaction & Workplace Culture Evidence, such as anonymized engagement surveys, feedback summaries or independent workplace assessments",
+        purpose: "Evaluates employee experience",
+      },
+      {
+        document:
+          "HR Policies & Workplace Compliance Evidence, including grievance mechanisms, workplace safety procedures, anti-harassment policies where applicable and relevant compliance records",
+        purpose: "Verifies responsible employment practices",
+      },
+    ]),
+    recommendedAdditional:
+      "Internal promotion statistics, employee recognition initiatives, diversity and inclusion programs, workplace safety awards and employee development case studies.",
+    evidenceNotes: [
+      "Employee personal information should be anonymized. Individual salary slips, medical records and other sensitive employee information should not be requested unless strictly necessary for a specific verification purpose.",
     ],
+    juryFocus:
+      "Workplace culture, employee engagement, retention, learning, welfare and responsible employment.",
     recognition: ["Winner", "1st Runner-Up", "2nd Runner-Up", "Official Finalist", "Official Finalist"],
     directApply: true,
   },

@@ -98,8 +98,8 @@ export const applicationSteps = [
   { id: 6, key: "mysuru", label: "Mysuru Contribution" },
   { id: 7, key: "signature", label: "Signature Achievement" },
   { id: 8, key: "evidence", label: "Evidence" },
-  { id: 9, key: "declaration", label: "Declaration" },
-  { id: 10, key: "review", label: "Review & Submit" },
+  { id: 9, key: "review", label: "Review & Submit" },
+  { id: 10, key: "declaration", label: "Declaration" },
 ] as const;
 
 export const mockSecretariatStats = {

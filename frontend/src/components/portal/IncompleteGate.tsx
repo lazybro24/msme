@@ -108,7 +108,7 @@ export function IncompleteGateDialog({
             </>
           ) : (
             <button type="button" className="btn-primary" onClick={onStay} autoFocus>
-              OK, I will complete them
+              Complete them
             </button>
           )}
         </div>

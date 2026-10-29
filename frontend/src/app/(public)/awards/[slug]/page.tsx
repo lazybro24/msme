@@ -104,8 +104,73 @@ export default async function AwardCategoryPage({
       </Band>
 
       <Band tone="light">
-        <div className="grid gap-6 md:grid-cols-2">
-          <ListBlock title="Evidence Required" items={category.evidence} tone="light" />
+        <div className="space-y-6">
+          <Tile tone="light">
+            <h2 className="section-title text-2xl">
+              Category-Specific Achievement &amp; Evidence Requirements
+            </h2>
+            <p className="mt-3 text-sm leading-relaxed text-[#555]">
+              Please provide relevant documents demonstrating your enterprise&apos;s achievements
+              in this award category. Equivalent supporting evidence may be accepted, subject to
+              verification. Coverage is expected across all five assessment areas.
+            </p>
+            <div className="mt-5 overflow-x-auto border border-black/10">
+              <table className="w-full min-w-[32rem] border-collapse text-left text-sm">
+                <thead className="bg-[#1a0c10] text-white">
+                  <tr>
+                    <th className="w-12 px-3 py-2.5 text-[10px] font-bold uppercase tracking-[0.12em]">
+                      No.
+                    </th>
+                    <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-[0.12em]">
+                      Supporting evidence document
+                    </th>
+                    <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-[0.12em]">
+                      Purpose
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {category.supportingEvidence.map((item, i) => (
+                    <tr
+                      key={item.document}
+                      className="border-t border-black/10 odd:bg-[#f7f4f2] even:bg-white"
+                    >
+                      <td className="px-3 py-3 align-top text-xs font-bold text-[var(--brand-gold-dark)]">
+                        {i + 1}
+                      </td>
+                      <td className="px-3 py-3 align-top leading-snug text-[#333]">
+                        {item.document}
+                      </td>
+                      <td className="px-3 py-3 align-top text-[13px] leading-snug text-[#666]">
+                        {item.purpose}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {category.recommendedAdditional && (
+              <p className="mt-4 text-sm leading-relaxed text-[#555]">
+                <span className="font-semibold text-[#222]">Recommended additional evidence: </span>
+                {category.recommendedAdditional}
+              </p>
+            )}
+            {category.juryFocus && (
+              <p className="mt-2 text-sm leading-relaxed text-[#555]">
+                <span className="font-semibold text-[#222]">Jury focus: </span>
+                {category.juryFocus}
+              </p>
+            )}
+            {category.evidenceNotes?.map((note) => (
+              <p
+                key={note}
+                className="mt-3 border border-[var(--brand-gold)]/35 bg-[#fff8e8] px-3 py-2.5 text-sm leading-relaxed text-[#444]"
+              >
+                <span className="font-semibold text-[#222]">Important: </span>
+                {note}
+              </p>
+            ))}
+          </Tile>
           <ListBlock title="Recognition" items={category.recognition} tone="light" />
         </div>
       </Band>

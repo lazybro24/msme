@@ -65,13 +65,22 @@ const docsStorage = multer.diskStorage({
   },
 });
 
+const DOCUMENT_MIME = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+]);
+const DOCUMENT_EXT = new Set([".pdf", ".jpg", ".jpeg", ".png", ".xlsx", ".xls"]);
+
 export const documentUpload = multer({
   storage: docsStorage,
-  limits: { fileSize: (Number(process.env.MAX_UPLOAD_MB) || 5) * 1024 * 1024 },
+  limits: { fileSize: (Number(process.env.MAX_UPLOAD_MB) || 10) * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
-    if (file.mimetype !== "application/pdf" && ext !== ".pdf") {
-      cb(new Error("Only PDF files are supported"));
+    if (!DOCUMENT_MIME.has(file.mimetype) && !DOCUMENT_EXT.has(ext)) {
+      cb(new Error("Only PDF, JPG, PNG or XLSX files are supported"));
       return;
     }
     cb(null, true);

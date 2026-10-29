@@ -32,6 +32,7 @@ export const applicantNav = [
   { href: "/nominate/categories", label: "3. Category" },
   { href: "/nominate/documents", label: "4. Documents" },
   { href: "/nominate/applications", label: "5. Nomination form" },
+  { href: "/nominate/declaration", label: "6. Declaration form" },
   { href: "/nominate/messages", label: "Messages" },
   { href: "/nominate/help", label: "Help" },
 ] as const;
